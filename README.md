@@ -1,2 +1,3 @@
-# xx2dw_gemini
-arcade gemini wings wasm version
+# intro
+game content copy from arcade gemini wings
+c++20 emscripten
