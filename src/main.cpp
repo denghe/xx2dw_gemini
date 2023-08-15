@@ -1,7 +1,7 @@
 #include "pch.h"
 
 struct GameLooper : Engine<GameLooper> {
-    std::array<xx::Shared<GLTexture>, 256> charTexs;
+    FpsViewer fv;
 
     xx::Shared<GLTexture> texTree, texTiles;
     int numOfUnloadedTexs{2};
@@ -10,11 +10,10 @@ struct GameLooper : Engine<GameLooper> {
         w = 1280;
         h = 720;
         tasks.Add([this]()->xx::Task<>{
-            int charSize = 64;
-            for (size_t c = 0; c < 256; ++c) {
-                charTexs[c] = xx::Make<GLTexture>(GLGenTextures<false>(), charSize, charSize * 1.5, std::to_string(c));
-                upload_unicode_char_to_texture(c, charSize, false);
-            }
+            // inits
+            fv.Init();
+
+            // async load pngs
             tasks.Add([this]()->xx::Task<>{
                 texTree = co_await AsyncLoadTextureFromUrl("res/tree.png");
                 --numOfUnloadedTexs;
@@ -32,8 +31,10 @@ struct GameLooper : Engine<GameLooper> {
         if (numOfUnloadedTexs > 0) return;
         Quad()
         .SetTexture(texTree).Draw(shader)
-        .SetTexture(texTiles).Draw(shader)
-        .SetTexture(charTexs[65]).Draw(shader);
+        .SetTexture(texTiles).Draw(shader);
+
+        // draw fps
+        fv.Draw(delta, { -w / 2, -h / 2}, shader);
     }
 };
 

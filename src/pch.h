@@ -11,7 +11,7 @@
 
 // code at library_js.js
 extern "C" {
-void upload_unicode_char_to_texture(int unicodeChar, int charSize, int applyShadow);
+void upload_unicode_char_to_texture(int unicodeChar, int charWidth, int charHeight, int applyShadow);
 void load_texture_from_url(GLuint texture, const char *url, int *outWidth, int *outHeight);
 }
 
@@ -427,6 +427,12 @@ struct Rect : XY {
 /**********************************************************************************************************************************/
 
 struct Shader {
+    inline static int drawVerts{}, drawCall{};
+    inline static void ClearCounter() {
+        drawVerts = {};
+        drawCall = {};
+    }
+
     GLShader v, f;
     GLProgram p;
     Shader() = default;
@@ -567,8 +573,8 @@ void main() {
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, quadCount);
         CheckGLError();
 
-//        sm->drawVerts += quadCount * 6;
-//        sm->drawCall += 1;
+        drawVerts += quadCount * 6;
+        drawCall += 1;
 
         lastTextureId = 0;
         quadCount = 0;
@@ -710,6 +716,40 @@ struct Quad : QuadInstanceData {
     }
 };
 
+struct FpsViewer {
+    std::array<xx::Shared<GLTexture>, 256> charTexs;
+    static constexpr int charWidth = 64, charHeight = charWidth * 1.5;
+    double fpsTimePool{}, counter{}, fps{};
+
+    void Init() {
+        for (size_t c = 0; c < 256; ++c) {
+            charTexs[c] = xx::Make<GLTexture>(GLGenTextures<false>(), charWidth, charHeight, std::to_string(c));
+            upload_unicode_char_to_texture(c, charWidth, charHeight, false);
+        }
+    }
+    void Draw(double delta, XY const& pos, Shader_QuadInstance& shader) {
+        ++counter;
+        fpsTimePool += delta;
+        if (fpsTimePool >= 1) {
+            fpsTimePool -= 1;
+            fps = counter;
+            counter = 0;
+        }
+        shader.Commit();    // for calc drawCall & drawVerts
+        auto s = std::string("FPS:") + std::to_string((uint32_t)fps)
+                 + " DC:" + std::to_string(Shader::drawCall)
+                 + " VC:" + std::to_string(Shader::drawVerts);
+
+        Quad q;
+        q.SetAnchor({0.f, 0.f });
+        for (size_t i = 0; i < s.size(); ++i) {
+            q.SetPosition(pos + XY{(float)i * charWidth * 0.75f, 0})
+            .SetTexture(charTexs[s[i]]).Draw(shader);
+        }
+    }
+};
+
+
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
@@ -743,7 +783,7 @@ struct EngineBase {
         glClearColor(0, 0, 0, 0);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        //sm.ClearCounter();
+        Shader::ClearCounter();
         shader.Begin(w, h);
     }
 

@@ -1,8 +1,8 @@
 mergeInto(LibraryManager.library, {
-  upload_unicode_char_to_texture: function(unicodeChar, charSize, applyShadow) {
+  upload_unicode_char_to_texture: function(unicodeChar, charWidth, charHeight, applyShadow) {
     var canvas = document.createElement('canvas');
-    canvas.height = charSize;
-    canvas.width = charSize * 0.75;
+    canvas.width = charWidth;
+    canvas.height = charHeight;
    document.body.appendChild(canvas); // Enable for debugging
     var ctx = canvas.getContext('2d');
     ctx.fillStyle = 'black';
@@ -11,7 +11,7 @@ mergeInto(LibraryManager.library, {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.globalAlpha = 1;
     ctx.fillStyle = 'white';
-    ctx.font = charSize + 'px Arial Unicode';
+    ctx.font = charWidth + 'px Arial Unicode';
     if (applyShadow) {
       ctx.shadowColor = 'black';
       ctx.shadowOffsetX = 2;
