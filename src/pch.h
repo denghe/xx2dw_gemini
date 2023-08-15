@@ -714,7 +714,7 @@ struct Quad : QuadInstanceData {
 /**********************************************************************************************************************************/
 
 struct EngineBase {
-    static constexpr float w = 1280, h = 720;
+    inline static float w = 800, h = 600;          // can change at Init()
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE glContext;
     double devicePixelRatio{};
     Shader_QuadInstance shader;

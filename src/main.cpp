@@ -5,6 +5,8 @@ struct GameLooper : Engine<GameLooper> {
     bool readyForDraw = false;
 
     void Init() {
+        w = 1280;
+        h = 720;
         tasks.Add([this]()->xx::Task<> {
             auto tex = co_await AsyncLoadTextureFromUrl("res/tree.png");
             q.SetTexture( tex );
