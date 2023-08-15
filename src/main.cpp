@@ -1,22 +1,31 @@
 #include "pch.h"
 
 struct GameLooper : Engine<GameLooper> {
-    Quad q;
+    xx::Shared<GLTexture> texTree, texTiles;
     bool readyForDraw = false;
 
     void Init() {
         w = 1280;
         h = 720;
         tasks.Add([this]()->xx::Task<> {
-            auto tex = co_await AsyncLoadTextureFromUrl("res/tree.png");
-            q.SetTexture( tex );
+            texTree = co_await AsyncLoadTextureFromUrl("res/tree.png");
+        });
+        tasks.Add([this]()->xx::Task<> {
+            texTiles = co_await AsyncLoadTextureFromUrl("res/tiles.png");
+        });
+        tasks.Add([this]()->xx::Task<> {
+            do {
+                co_yield 0;
+            } while(!texTree || !texTiles);
             readyForDraw = true;
         });
     }
 
     void Draw() {
         if (!readyForDraw) return;
-        q.Draw(shader);
+        Quad q;
+        q.SetTexture(texTree).Draw(shader)
+        .SetTexture(texTiles).Draw(shader);
     }
 };
 
@@ -30,10 +39,3 @@ int main() {
         return gLooper.JsLoopCallback();
     }, nullptr);
 }
-
-
-//            for (int i = 0; i < 1200; ++i) {
-//                std::cout << nowSecs << " : " << frameNumber << std::endl;
-//                co_yield 0;
-//            }
-//            running = false;

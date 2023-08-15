@@ -1,8 +1,8 @@
 mergeInto(LibraryManager.library, {
   uploadFlipped: function(img) {
-    GLctx.pixelStorei(0x9240/*GLctx.UNPACK_FLIP_Y_WEBGL*/, true);
+    //GLctx.pixelStorei(0x9240/*GLctx.UNPACK_FLIP_Y_WEBGL*/, true);
     GLctx.texImage2D(0xDE1/*GLctx.TEXTURE_2D*/, 0, 0x1908/*GLctx.RGBA*/, 0x1908/*GLctx.RGBA*/, 0x1401/*GLctx.UNSIGNED_BYTE*/, img);
-    GLctx.pixelStorei(0x9240/*GLctx.UNPACK_FLIP_Y_WEBGL*/, false);
+    //GLctx.pixelStorei(0x9240/*GLctx.UNPACK_FLIP_Y_WEBGL*/, false);
   },
   upload_unicode_char_to_texture__deps: ['uploadFlipped'],
   upload_unicode_char_to_texture: function(unicodeChar, charSize, applyShadow) {
