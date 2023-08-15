@@ -724,7 +724,7 @@ struct FpsViewer {
     void Init() {
         for (size_t c = 0; c < 256; ++c) {
             charTexs[c] = xx::Make<GLTexture>(GLGenTextures<false>(), charWidth, charHeight, std::to_string(c));
-            upload_unicode_char_to_texture(c, charWidth, charHeight, false);
+            upload_unicode_char_to_texture(c, charWidth, charHeight, true);
         }
     }
     void Draw(double delta, XY const& pos, Shader_QuadInstance& shader) {

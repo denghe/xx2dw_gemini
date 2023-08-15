@@ -3,7 +3,7 @@ mergeInto(LibraryManager.library, {
     var canvas = document.createElement('canvas');
     canvas.width = charWidth;
     canvas.height = charHeight;
-   document.body.appendChild(canvas); // Enable for debugging
+//  document.body.appendChild(canvas); // Enable for debugging
     var ctx = canvas.getContext('2d');
     ctx.fillStyle = 'black';
     ctx['globalCompositeOperator'] = 'copy';
