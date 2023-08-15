@@ -1,7 +1,11 @@
 #include "pch.h"
 
 struct GameLooper : Engine<GameLooper> {
+    Quad q;
+
     void Init() {
+        q.SetTexture( xx::Make<GLTexture>( LoadTextureFromUrl("res/moon.png") ) );
+
         tasks.Add([this]()->xx::Task<> {
             // todo
             for (int i = 0; i < 120; ++i) {
@@ -11,6 +15,7 @@ struct GameLooper : Engine<GameLooper> {
             running = false;
         });
     }
+
 
     void Draw() {
         // todo

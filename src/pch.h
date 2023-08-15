@@ -110,7 +110,7 @@ GLuint GLGenTextures() {
     GLuint t{};
     glGenTextures(1, &t);
     glBindTexture(GL_TEXTURE_2D, t);
-    GLTexParameteri_<filter, wraper>();
+    GLTexParameteri<filter, wraper>();
     if constexpr(exitBind0) {
         glBindTexture(GL_TEXTURE_2D, 0);
     }
@@ -132,6 +132,14 @@ struct GLTexture : GLRes<GLResTypes::Texture, GLsizei, GLsizei, std::string> {
     auto const& Height() const { return std::get<2>(vs); }
     auto const& FileName() const { return std::get<3>(vs); }
 };
+
+inline GLTexture LoadTextureFromUrl(char const* url) {
+    auto i = GLGenTextures();
+    int tw{}, th{};
+    load_texture_from_url(i, url, &tw, &th);
+    return { i, tw, th, url };
+}
+
 
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
@@ -766,15 +774,21 @@ struct Engine : EngineBase {
     EM_BOOL running{ EM_TRUE };
     xx::Tasks tasks;
 
-    xx::Task<> Sleep(double secs) {
-        auto e = nowSecs + secs;
-        do {
-            co_yield 0;
-        } while (nowSecs < e);
+    Engine() {
+        if constexpr(Has_Init<Derived>) {
+            ((Derived*)this)->Init();
+        }
+
+        GLInit();
+
+        if constexpr(Has_AfterInit<Derived>) {
+            ((Derived*)this)->AfterInit();
+        }
     }
 
     EM_BOOL JsLoopCallback() {
         GLUpdate();
+
         if (delta > maxFrameDelay) {
             delta = maxFrameDelay;
         }
@@ -790,20 +804,17 @@ struct Engine : EngineBase {
         if constexpr(Has_Draw<Derived>) {
             ((Derived*)this)->Draw();
         }
+
         GLUpdateEnd();
         return running;
     }
 
-    Engine() {
-        if constexpr(Has_Init<Derived>) {
-            ((Derived*)this)->Init();
-        }
-
-        GLInit();
-
-        if constexpr(Has_AfterInit<Derived>) {
-            ((Derived*)this)->AfterInit();
-        }
+    // utils
+    xx::Task<> Sleep(double secs) {
+        auto e = nowSecs + secs;
+        do {
+            co_yield 0;
+        } while (nowSecs < e);
     }
 };
 
