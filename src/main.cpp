@@ -1,30 +1,31 @@
 #include "pch.h"
 
+#define go tasks.Add([this]()->xx::Task<>
+
 struct GameLooper : Engine<GameLooper> {
     xx::Shared<GLTexture> texTree, texTiles;
-    bool readyForDraw = false;
+    int numOfUnloadedTexs{2};
 
     void Init() {
         w = 1280;
         h = 720;
-        tasks.Add([this]()->xx::Task<> {
-            texTree = co_await AsyncLoadTextureFromUrl("res/tree.png");
-        });
-        tasks.Add([this]()->xx::Task<> {
-            texTiles = co_await AsyncLoadTextureFromUrl("res/tiles.png");
-        });
-        tasks.Add([this]()->xx::Task<> {
-            do {
-                co_yield 0;
-            } while(!texTree || !texTiles);
-            readyForDraw = true;
+        go {
+            go {
+                texTree = co_await AsyncLoadTextureFromUrl("res/tree.png");
+                --numOfUnloadedTexs;
+            });
+            go {
+                texTiles = co_await AsyncLoadTextureFromUrl("res/tiles.png");
+               --numOfUnloadedTexs;
+            });
+            while (numOfUnloadedTexs > 0) co_yield 0;
+            std::cout << "all tex loaded\n";
         });
     }
 
     void Draw() {
-        if (!readyForDraw) return;
-        Quad q;
-        q.SetTexture(texTree).Draw(shader)
+        if (numOfUnloadedTexs > 0) return;
+        Quad().SetTexture(texTree).Draw(shader)
         .SetTexture(texTiles).Draw(shader);
     }
 };
