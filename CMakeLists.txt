@@ -75,7 +75,7 @@ if (EMSCRIPTEN)
 	append_linker_flags("-sGL_SUPPORT_SIMPLE_ENABLE_EXTENSIONS=0")
 
 	# Optimization flag to optimize aggressively for size. (other options -Os, -O3, -O2, -O1, -O0)
-	append_linker_flags("-Oz")
+	#append_linker_flags("-Oz")
 
 	# Reduce code size: We do not need libc errno field support in our build output.
 	append_linker_flags("-sSUPPORT_ERRNO=0")

@@ -4,10 +4,11 @@ struct GameLooper : Engine<GameLooper> {
     Quad q;
 
     void Init() {
-        q.SetTexture( xx::Make<GLTexture>( LoadTextureFromUrl("res/moon.png") ) );
-
         tasks.Add([this]()->xx::Task<> {
-            // todo
+            auto&& tex = co_await AsyncLoadTextureFromUrl("res/tree.png");
+            if (!tex) co_return;
+            q.SetTexture( tex );
+
             for (int i = 0; i < 120; ++i) {
                 std::cout << nowSecs << " : " << frameNumber << std::endl;
                 co_yield 0;
@@ -16,16 +17,14 @@ struct GameLooper : Engine<GameLooper> {
         });
     }
 
-
     void Draw() {
-        // todo
+        if (q.tex) {
+            q.Draw(shader);
+        }
     }
 };
 
 inline GameLooper gLooper;
-
-/**********************************************************************************************************************************/
-/**********************************************************************************************************************************/
 
 int main() {
     emscripten_request_animation_frame_loop([](double nowMS, void*)->EM_BOOL {

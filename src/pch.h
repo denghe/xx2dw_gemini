@@ -133,13 +133,6 @@ struct GLTexture : GLRes<GLResTypes::Texture, GLsizei, GLsizei, std::string> {
     auto const& FileName() const { return std::get<3>(vs); }
 };
 
-inline GLTexture LoadTextureFromUrl(char const* url) {
-    auto i = GLGenTextures();
-    int tw{}, th{};
-    load_texture_from_url(i, url, &tw, &th);
-    return { i, tw, th, url };
-}
-
 
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
@@ -558,6 +551,7 @@ void main() {
         glUniform1i(uTex0, 0);
         glUniform2f(uCxy, 2 / w, 2 / h);
         glBindVertexArray(va);
+        std::cout << "shader begin" << std::endl;
     }
 
     void End() {
@@ -579,6 +573,7 @@ void main() {
 
         lastTextureId = 0;
         quadCount = 0;
+        std::cout << "shader commit" << std::endl;
     }
 
     QuadInstanceData* Draw(GLTexture const& tex, int numQuads) {
@@ -711,6 +706,10 @@ struct Quad : QuadInstanceData {
         color.a = 255 * a;
         return *this;
     }
+    Quad& Draw(Shader_QuadInstance& s) {
+        s.Draw(*tex, *this);
+        return *this;
+    }
 };
 
 /**********************************************************************************************************************************/
@@ -735,6 +734,9 @@ struct EngineBase {
         xx_assert(glContext);
         emscripten_webgl_make_context_current(glContext);
 
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
         shader.Init();
     }
 
@@ -749,10 +751,6 @@ struct EngineBase {
 
     void GLUpdateEnd() {
         shader.End();
-    }
-
-    void Draw(Quad const& o) {
-        shader.Draw(*o.tex, o);
     }
 };
 
@@ -778,7 +776,6 @@ struct Engine : EngineBase {
         if constexpr(Has_Init<Derived>) {
             ((Derived*)this)->Init();
         }
-
         GLInit();
 
         if constexpr(Has_AfterInit<Derived>) {
@@ -809,13 +806,38 @@ struct Engine : EngineBase {
         return running;
     }
 
-    // utils
+    // task utils
     xx::Task<> Sleep(double secs) {
         auto e = nowSecs + secs;
         do {
             co_yield 0;
         } while (nowSecs < e);
     }
+
+    template<int timeoutSeconds = 10, bool showLog = false>
+    xx::Task<xx::Shared<GLTexture>> AsyncLoadTextureFromUrl(char const* url) {
+        if constexpr(showLog) {
+            std::cout << "LoadTextureFromUrl( " << url << " ) : begin. nowSecs = " << nowSecs << std::endl;
+        }
+        auto i = GLGenTextures<true>();
+        int tw{}, th{};
+        load_texture_from_url(i, url, &tw, &th);
+        auto elapsedSecs = nowSecs + timeoutSeconds;
+        while(nowSecs < elapsedSecs) {
+            co_yield 0;
+            if (tw) {
+                if constexpr(showLog) {
+                    std::cout << "LoadTextureFromUrl( " << url << " ) : loaded. nowSecs = " << nowSecs << ", size = " << tw << "," << th << std::endl;
+                }
+                co_return xx::Make<GLTexture>(GLTexture{ i, tw, th, url });
+            }
+        }
+        if constexpr(showLog) {
+            std::cout << "LoadTextureFromUrl( " << url << " ) : timeout. timeoutSeconds = " << timeoutSeconds << std::endl;
+        }
+        co_return xx::Shared<GLTexture>{};
+    }
+
 };
 
 
