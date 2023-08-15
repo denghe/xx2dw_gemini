@@ -551,7 +551,6 @@ void main() {
         glUniform1i(uTex0, 0);
         glUniform2f(uCxy, 2 / w, 2 / h);
         glBindVertexArray(va);
-        std::cout << "shader begin" << std::endl;
     }
 
     void End() {
@@ -573,7 +572,6 @@ void main() {
 
         lastTextureId = 0;
         quadCount = 0;
-        std::cout << "shader commit" << std::endl;
     }
 
     QuadInstanceData* Draw(GLTexture const& tex, int numQuads) {
@@ -814,7 +812,7 @@ struct Engine : EngineBase {
         } while (nowSecs < e);
     }
 
-    template<int timeoutSeconds = 10, bool showLog = false>
+    template<bool showLog = false, int timeoutSeconds = 10>
     xx::Task<xx::Shared<GLTexture>> AsyncLoadTextureFromUrl(char const* url) {
         if constexpr(showLog) {
             std::cout << "LoadTextureFromUrl( " << url << " ) : begin. nowSecs = " << nowSecs << std::endl;
@@ -829,7 +827,7 @@ struct Engine : EngineBase {
                 if constexpr(showLog) {
                     std::cout << "LoadTextureFromUrl( " << url << " ) : loaded. nowSecs = " << nowSecs << ", size = " << tw << "," << th << std::endl;
                 }
-                co_return xx::Make<GLTexture>(GLTexture{ i, tw, th, url });
+                co_return xx::Make<GLTexture>(i, tw, th, url);
             }
         }
         if constexpr(showLog) {

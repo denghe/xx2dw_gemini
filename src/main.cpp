@@ -2,25 +2,19 @@
 
 struct GameLooper : Engine<GameLooper> {
     Quad q;
+    bool readyForDraw = false;
 
     void Init() {
         tasks.Add([this]()->xx::Task<> {
-            auto&& tex = co_await AsyncLoadTextureFromUrl("res/tree.png");
-            if (!tex) co_return;
+            auto tex = co_await AsyncLoadTextureFromUrl("res/tree.png");
             q.SetTexture( tex );
-
-            for (int i = 0; i < 120; ++i) {
-                std::cout << nowSecs << " : " << frameNumber << std::endl;
-                co_yield 0;
-            }
-            running = false;
+            readyForDraw = true;
         });
     }
 
     void Draw() {
-        if (q.tex) {
-            q.Draw(shader);
-        }
+        if (!readyForDraw) return;
+        q.Draw(shader);
     }
 };
 
@@ -34,3 +28,10 @@ int main() {
         return gLooper.JsLoopCallback();
     }, nullptr);
 }
+
+
+//            for (int i = 0; i < 1200; ++i) {
+//                std::cout << nowSecs << " : " << frameNumber << std::endl;
+//                co_yield 0;
+//            }
+//            running = false;
