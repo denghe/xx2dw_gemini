@@ -1,10 +1,16 @@
 #include "pch.h"
 
+struct Foo {
+    XY pos;
+};
+
 struct GameLooper : Engine<GameLooper> {
     FpsViewer fv;
 
     xx::Shared<GLTexture> texTree, texTiles;
     int numOfUnloadedTexs{2};
+
+    std::vector<Foo> foos;
 
     void Init() {
         w = 1280;
@@ -24,14 +30,27 @@ struct GameLooper : Engine<GameLooper> {
             });
             while (numOfUnloadedTexs > 0) co_yield 0;
             std::cout << "all tex loaded\n";
+
+            // init foos
+            foos.resize(400000);
+            for(auto& foo : foos) {
+                foo.pos = { float(rand() % (int)w), float(rand() % (int)h) };
+            }
         });
     }
 
     void Draw() {
-        if (numOfUnloadedTexs > 0) return;
-        Quad()
-        .SetTexture(texTree).Draw(shader)
-        .SetTexture(texTiles).Draw(shader);
+        if (numOfUnloadedTexs > 0) {
+            // todo: display "loading..." ?
+            return;
+        }
+
+        Quad q;
+        q.SetTexture(texTree);
+        XY basePos{ -w / 2, -h / 2 };
+        for(auto& foo : foos) {
+            q.SetPosition(basePos + foo.pos).Draw(shader);
+        }
 
         // draw fps
         fv.Draw(delta, { -w / 2, -h / 2}, shader);
