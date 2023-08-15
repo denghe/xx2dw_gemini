@@ -781,7 +781,18 @@ struct Engine : EngineBase {
         }
     }
 
-    EM_BOOL JsLoopCallback() {
+    /*
+int main() {
+    emscripten_request_animation_frame_loop([](double ms, void*)->EM_BOOL {
+        return ???????????????.JsLoopCallback(ms);
+    }, nullptr);
+}
+    */
+    EM_BOOL JsLoopCallback(double ms) {
+        auto s = ms / 1000;
+        delta = s - nowSecs;
+        nowSecs = s;
+
         GLUpdate();
 
         if (delta > maxFrameDelay) {
