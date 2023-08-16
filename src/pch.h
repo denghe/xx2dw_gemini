@@ -4,6 +4,7 @@
 
 #include <xx_task.h>
 #include <xx_queue.h>
+#include <xx_string.h>
 
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
@@ -11,8 +12,8 @@
 
 // code at library_js.js
 extern "C" {
-void init_canvas_for_char(int charWidth, int charHeight);
-void upload_unicode_char_to_texture(int unicodeChar);
+void init_gCanvas(int width, int height);
+double upload_unicode_char_to_texture(int charSize, const char *unicodeChar);
 void load_texture_from_url(GLuint texture, const char *url, int *outWidth, int *outHeight);
 }
 
@@ -717,19 +718,71 @@ struct Quad : QuadInstanceData {
     }
 };
 
-struct FpsViewer {
-    std::array<xx::Shared<GLTexture>, 256> charTexs;
-    static constexpr int charWidth = 32, charHeight = charWidth * 1.5;
-    double fpsTimePool{}, counter{}, fps{};
+// todo: runtime combine to big texture
 
+struct CharInfo {
+    xx::Shared<GLTexture> tex;
+    float width{};
+};
+
+struct CharPainter {
+    static constexpr int charSize = 32, canvasWidth = charSize * 1.5, canvasHeight = charSize;
+    std::array<CharInfo, 256> bases;
+    std::unordered_map<char32_t, CharInfo> extras;
+
+    // need ogl frame env
     void Init() {
-        init_canvas_for_char(charWidth, charHeight);
-        for (size_t c = 0; c < 256; ++c) {
-            charTexs[c] = xx::Make<GLTexture>(GLGenTextures<false>(), charWidth, charHeight, std::to_string(c));
-            upload_unicode_char_to_texture(c);
+        init_gCanvas(canvasWidth, canvasHeight);
+
+        char buf[16];
+        for (char32_t c = 0; c < 256; ++c) {
+            MakeCharInfo(c);
         }
     }
-    void Draw(double delta, XY const& pos, Shader_QuadInstance& shader) {
+
+    CharInfo* MakeCharInfo(char32_t c) {
+        char buf[16];
+        CharInfo ci;
+        ci.tex = xx::Make<GLTexture>(GLGenTextures<false>(), canvasWidth, canvasHeight, std::to_string((int) c));
+        buf[xx::Char32ToUtf8(c, buf)] = '\0';
+        ci.width = upload_unicode_char_to_texture(charSize, buf);
+        if (c < 256) {
+            bases[c] = std::move(ci);
+            return &bases[c];
+        } else {
+            auto rtv = extras.insert(std::make_pair(c, std::move(ci)));
+            return &rtv.first->second;
+        }
+    }
+
+    void Draw(std::u32string_view const& s, XY pos, Shader_QuadInstance& shader) {
+        Quad q;
+        q.SetAnchor({0.f, 0.f });
+        for (size_t i = 0; i < s.size(); ++i) {
+            auto c = s[i];
+            CharInfo* ci;
+            if (c < 256) {
+                ci = &bases[c];
+            } else {
+                if (auto iter = extras.find(c); iter != extras.end()) {
+                    ci = &iter->second;
+                } else {
+                    ci = MakeCharInfo(c);
+                }
+            }
+            q.SetPosition(pos).SetTexture(ci->tex).Draw(shader);
+            pos.x += ci->width;
+        }
+    }
+    void Draw(std::string_view const& s, XY const& pos, Shader_QuadInstance& shader) {
+        Draw(xx::StringU8ToU32(s), pos, shader);
+    }
+};
+
+struct FpsViewer {
+    double fpsTimePool{}, counter{}, fps{};
+
+    void Draw(CharPainter& cp, double delta, XY const& pos, Shader_QuadInstance& shader) {
         ++counter;
         fpsTimePool += delta;
         if (fpsTimePool >= 1) {
@@ -741,13 +794,7 @@ struct FpsViewer {
         auto s = std::string("FPS:") + std::to_string((uint32_t)fps)
                  + " DC:" + std::to_string(Shader::drawCall)
                  + " VC:" + std::to_string(Shader::drawVerts);
-
-        Quad q;
-        q.SetAnchor({0.f, 0.f });
-        for (size_t i = 0; i < s.size(); ++i) {
-            q.SetPosition(pos + XY{(float)i * charWidth * 0.75f, 0})
-            .SetTexture(charTexs[s[i]]).Draw(shader);
-        }
+        cp.Draw(s, pos, shader);
     }
 };
 
@@ -764,7 +811,7 @@ struct EngineBase {
     void GLInit() {
         double dpr = emscripten_get_device_pixel_ratio();
         emscripten_set_element_css_size("canvas", w / dpr, h / dpr);
-        emscripten_set_canvas_element_size("canvas", w, h);
+        emscripten_set_canvas_element_size("canvas", (int)w, (int)h);
 
         EmscriptenWebGLContextAttributes attrs;
         emscripten_webgl_init_context_attributes(&attrs);
@@ -781,7 +828,7 @@ struct EngineBase {
     }
 
     void GLUpdate() {
-        glViewport(0, 0, w, h);
+        glViewport(0, 0, (int)w, (int)h);
         glClearColor(0, 0, 0, 0);
         glClear(GL_COLOR_BUFFER_BIT);
 

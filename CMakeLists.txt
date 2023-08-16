@@ -100,7 +100,11 @@ target_precompile_headers(gemini
 	PUBLIC $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/pch.h>
 )
 
-file(GLOB_RECURSE assets res/*.*)
+file(GLOB_RECURSE assets
+	res/*.*
+)
 foreach(asset ${assets})
 	file(COPY "${asset}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/res/")
 endforeach()
+
+file(COPY "favicon.ico" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/")

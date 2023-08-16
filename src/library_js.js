@@ -1,25 +1,28 @@
 mergeInto(LibraryManager.library, {
 
-  init_canvas_for_char: function(charWidth, charHeight) {
+  init_gCanvas: function(width, height) {
     if (window['gCanvas'] === undefined) {
       var canvas = document.createElement('canvas');
-      canvas.width = charWidth;
-      canvas.height = charHeight;
+      canvas.width = width;
+      canvas.height = height;
       var ctx = canvas.getContext('2d');
       ctx.globalAlpha = 1;
       ctx.fillStyle = 'white';
-      ctx.font = charWidth + 'px Arial Unicode';
       window['gCanvas'] = canvas;
       window['gCanvasCtx'] = ctx;
     }
   },
 
-  upload_unicode_char_to_texture: function(unicodeChar) {
+  upload_unicode_char_to_texture: function(charSize, utf8Char) {
     var canvas = window['gCanvas'];
     var ctx = window['gCanvasCtx'];
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillText(String.fromCharCode(unicodeChar), 0, canvas.height);
+    ctx.font = charSize + 'px Consolas';
+    var str = UTF8ToString(utf8Char);
+    var strPixelWidth = ctx.measureText(str).width;
+    ctx.fillText(str, 0, canvas.height);
     GLctx.texImage2D(GLctx.TEXTURE_2D, 0, GLctx.RGBA, GLctx.RGBA, GLctx.UNSIGNED_BYTE, canvas);
+    return strPixelWidth;
   },
 
   load_texture_from_url: function(glTexture, url, outW, outH) {
