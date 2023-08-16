@@ -1,11 +1,12 @@
 #include "pch.h"
 
 struct Foo {
-    char c;
+    char32_t c;
     XY pos;
 };
 
 struct GameLooper : Engine<GameLooper> {
+    CharPainter cp;
     FpsViewer fv;
     std::vector<Foo> foos;
 
@@ -14,7 +15,7 @@ struct GameLooper : Engine<GameLooper> {
         h = 720;
         tasks.Add([this]()->xx::Task<>{
             // inits
-            fv.Init();
+            cp.Init();
 
             // init foos
             foos.resize(10000);
@@ -22,6 +23,8 @@ struct GameLooper : Engine<GameLooper> {
                 foo.c = rand() % 256;
                 foo.pos = { float(rand() % (int)w), float(rand() % (int)h) };
             }
+
+            co_return;
         });
     }
 
@@ -30,12 +33,11 @@ struct GameLooper : Engine<GameLooper> {
         q.SetColor({127,127,127,127});
         XY basePos{ -w / 2, -h / 2 };
         for(auto& foo : foos) {
-            q.SetTexture(fv.charTexs[foo.c]);
-            q.SetPosition(basePos + foo.pos).Draw(shader);
+            q.SetTexture(cp.Find(foo.c).tex).SetPosition(basePos + foo.pos).Draw(this);
         }
 
         // draw fps
-        fv.Draw(delta, { -w / 2, -h / 2}, shader);
+        fv.Draw(this, cp, delta, { -w / 2, -h / 2});
     }
 };
 
