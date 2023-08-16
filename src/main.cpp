@@ -3,6 +3,7 @@
 struct GameLooper : Engine<GameLooper> {
     CharPainter cp;
     FpsViewer fv;
+    xx::Shared<GLTexture> tex;
 
     void Init() {
         w = 1280;
@@ -10,15 +11,24 @@ struct GameLooper : Engine<GameLooper> {
         tasks.Add([this]()->xx::Task<>{
             cp.Init();
 
+            // fill tex
+            auto str = U"💘💓💔💕💖💗💙💚💛💜💝💞💟";
+            auto strWidth = cp.Measure(this, str);
+            tex = FrameBuffer::MakeTexture({(uint32_t)strWidth, 128});
+            FrameBuffer(true).DrawTo(this, tex, RGBA8{111,111,111,111}, [&]{
+                cp.Draw(this, {-strWidth / 2, 0}, str);
+            });
+
             co_return;
         });
     }
 
     void Draw() {
-        cp.Draw(U"💘💓💔💕💖💗💙💚💛💜💝💞💟", {}, shader);
+        // draw tex
+        Quad().SetTexture(tex).Draw(this);
 
         // draw fps
-        fv.Draw(cp, delta, { -w / 2, -h / 2}, shader);
+        fv.Draw(this, cp, delta, { -w / 2, -h / 2});
     }
 };
 

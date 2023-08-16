@@ -601,6 +601,61 @@ void main() {
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
+struct EngineBase {
+    inline static float w = 800, h = 600;          // can change at Init()
+    EMSCRIPTEN_WEBGL_CONTEXT_HANDLE glContext;
+    double devicePixelRatio{};
+    Shader_QuadInstance shader;
+
+    void GLInit() {
+        double dpr = emscripten_get_device_pixel_ratio();
+        emscripten_set_element_css_size("canvas", w / dpr, h / dpr);
+        emscripten_set_canvas_element_size("canvas", (int)w, (int)h);
+
+        EmscriptenWebGLContextAttributes attrs;
+        emscripten_webgl_init_context_attributes(&attrs);
+        attrs.alpha = 0;
+        attrs.majorVersion = 2;
+        glContext = emscripten_webgl_create_context("canvas", &attrs);
+        xx_assert(glContext);
+        emscripten_webgl_make_context_current(glContext);
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        shader.Init();
+    }
+
+    void GLViewport() {
+        glViewport(0, 0, (int)w, (int)h);
+    }
+
+    void GLClear(RGBA8 c) {
+        glClearColor(c.r / 255.f, c.g / 255.f, c.b / 255.f, c.a / 255.f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        //glDepthMask(true);
+        //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        //glDepthMask(false);
+    }
+
+    void GLUpdate() {
+        GLViewport();
+        GLClear({});
+
+        Shader::ClearCounter();
+        shader.Begin(w, h);
+    }
+
+    void GLUpdateEnd() {
+        shader.End();
+    }
+
+};
+
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
 // sprite frame
 struct Frame {
     xx::Shared<GLTexture> tex;
@@ -629,6 +684,10 @@ struct Frame {
         return f;
     }
 };
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
 
 // sprite
 struct Quad : QuadInstanceData {
@@ -712,11 +771,15 @@ struct Quad : QuadInstanceData {
         color.a = 255 * a;
         return *this;
     }
-    Quad& Draw(Shader_QuadInstance& s) {
-        s.Draw(*tex, *this);
+    Quad& Draw(EngineBase* eg) {
+        eg->shader.Draw(*tex, *this);
         return *this;
     }
 };
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
 
 // todo: runtime combine to big texture
 
@@ -740,7 +803,7 @@ struct CharPainter {
         }
     }
 
-    CharInfo* MakeCharInfo(char32_t c) {
+    CharInfo& MakeCharInfo(char32_t c) {
         char buf[16];
         CharInfo ci;
         ci.tex = xx::Make<GLTexture>(GLGenTextures<false>(), canvasWidth, canvasHeight, std::to_string((int) c));
@@ -748,41 +811,61 @@ struct CharPainter {
         ci.width = upload_unicode_char_to_texture(charSize, buf);
         if (c < 256) {
             bases[c] = std::move(ci);
-            return &bases[c];
+            return bases[c];
         } else {
             auto rtv = extras.insert(std::make_pair(c, std::move(ci)));
-            return &rtv.first->second;
+            return rtv.first->second;
         }
     }
 
-    void Draw(std::u32string_view const& s, XY pos, Shader_QuadInstance& shader) {
+    CharInfo& Find(char32_t c) {
+        CharInfo* ci;
+        if (c < 256) {
+            return bases[c];
+        } else {
+            if (auto iter = extras.find(c); iter != extras.end()) {
+                return iter->second;
+            } else {
+                return MakeCharInfo(c);
+            }
+        }
+    }
+
+    void Draw(EngineBase* eg, XY pos, std::u32string_view const& s) {
         Quad q;
         q.SetAnchor({0.f, 0.f });
         for (size_t i = 0; i < s.size(); ++i) {
-            auto c = s[i];
-            CharInfo* ci;
-            if (c < 256) {
-                ci = &bases[c];
-            } else {
-                if (auto iter = extras.find(c); iter != extras.end()) {
-                    ci = &iter->second;
-                } else {
-                    ci = MakeCharInfo(c);
-                }
-            }
-            q.SetPosition(pos).SetTexture(ci->tex).Draw(shader);
-            pos.x += ci->width;
+            auto ci = Find(s[i]);
+            q.SetPosition(pos).SetTexture(ci.tex).Draw(eg);
+            pos.x += ci.width;
         }
     }
-    void Draw(std::string_view const& s, XY const& pos, Shader_QuadInstance& shader) {
-        Draw(xx::StringU8ToU32(s), pos, shader);
+
+    void Draw(EngineBase* eg, XY const& pos, std::string_view const& s) {
+        Draw(eg, pos, xx::StringU8ToU32(s));
+    }
+
+    float Measure(EngineBase* eg, std::u32string_view const& s) {
+        float w{};
+        for (size_t i = 0; i < s.size(); ++i) {
+            w += Find(s[i]).width;
+        }
+        return w;
+    }
+
+    float Measure(EngineBase* eg, std::string_view const& s) {
+        return Measure(eg, xx::StringU8ToU32(s));
     }
 };
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
 
 struct FpsViewer {
     double fpsTimePool{}, counter{}, fps{};
 
-    void Draw(CharPainter& cp, double delta, XY const& pos, Shader_QuadInstance& shader) {
+    void Draw(EngineBase* eg, CharPainter& cp, double delta, XY const& pos) {
         ++counter;
         fpsTimePool += delta;
         if (fpsTimePool >= 1) {
@@ -790,56 +873,78 @@ struct FpsViewer {
             fps = counter;
             counter = 0;
         }
-        shader.Commit();    // for calc drawCall & drawVerts
+        eg->shader.Commit();    // for calc drawCall & drawVerts
         auto s = std::string("FPS:") + std::to_string((uint32_t)fps)
                  + " DC:" + std::to_string(Shader::drawCall)
                  + " VC:" + std::to_string(Shader::drawVerts);
-        cp.Draw(s, pos, shader);
+        cp.Draw(eg, pos, s);
     }
 };
-
 
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
-struct EngineBase {
-    inline static float w = 800, h = 600;          // can change at Init()
-    EMSCRIPTEN_WEBGL_CONTEXT_HANDLE glContext;
-    double devicePixelRatio{};
-    Shader_QuadInstance shader;
+struct FrameBuffer {
+    GLFrameBuffer fb;
+    XY bak{};
 
-    void GLInit() {
-        double dpr = emscripten_get_device_pixel_ratio();
-        emscripten_set_element_css_size("canvas", w / dpr, h / dpr);
-        emscripten_set_canvas_element_size("canvas", (int)w, (int)h);
-
-        EmscriptenWebGLContextAttributes attrs;
-        emscripten_webgl_init_context_attributes(&attrs);
-        attrs.alpha = 0;
-        attrs.majorVersion = 2;
-        glContext = emscripten_webgl_create_context("canvas", &attrs);
-        xx_assert(glContext);
-        emscripten_webgl_make_context_current(glContext);
-
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        shader.Init();
+    // need ogl frame env
+    explicit FrameBuffer(bool autoInit = false) {
+        if (autoInit) {
+            Init();
+        }
     }
 
-    void GLUpdate() {
-        glViewport(0, 0, (int)w, (int)h);
-        glClearColor(0, 0, 0, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        Shader::ClearCounter();
-        shader.Begin(w, h);
+    // need ogl frame env
+    FrameBuffer& Init() {
+        if (fb) {
+            throw std::logic_error("excessive initializations ?");
+        }
+        fb = MakeGLFrameBuffer();
+        return *this;
     }
 
-    void GLUpdateEnd() {
-        shader.End();
+    inline static xx::Shared<GLTexture> MakeTexture(Vec2<uint32_t> const& wh, bool const& hasAlpha = true) {
+        return xx::Make<GLTexture>(MakeGLFrameBufferTexture(wh.x, wh.y, hasAlpha));
+    }
+
+    template<typename Func>
+    void DrawTo(EngineBase* eg, xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c, Func&& func) {
+        Begin(eg, t, c);
+        func();
+        End(eg);
+    }
+
+    template<typename Func>
+    xx::Shared<GLTexture> Draw(EngineBase* eg, Vec2<uint32_t> const& wh, bool const& hasAlpha, std::optional<RGBA8> const& c, Func&& func) {
+        auto t = MakeTexture(wh, hasAlpha);
+        DrawTo(eg, t, c, std::forward<Func>(func));
+        return t;
+    }
+
+protected:
+    void Begin(EngineBase* eg, xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c = {}) {
+        eg->shader.End();
+        bak.x = eg->w;
+        bak.y = eg->h;
+        eg->w = t->Width();
+        eg->h = t->Height();
+        BindGLFrameBufferTexture(fb, *t);
+        eg->GLViewport();
+        if (c.has_value()) {
+            eg->GLClear(c.value());
+        }
+        eg->shader.Begin(eg->w, eg->h);
+    }
+    void End(EngineBase* eg) {
+        eg->shader.End();
+        UnbindGLFrameBuffer();
+        eg->w = bak.x;
+        eg->h = bak.y;
+        eg->GLViewport();
     }
 };
+
 
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
