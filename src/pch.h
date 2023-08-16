@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #ifndef XX2DW_GEMINI_PCH_H_
 #define XX2DW_GEMINI_PCH_H_
 
@@ -607,9 +607,18 @@ struct EngineBase {
     double devicePixelRatio{};
     Shader_QuadInstance shader;
 
+    static constexpr float fps = 60, frameDelay = 1.f / fps, maxFrameDelay = frameDelay * 3;
+    double nowSecs{}, delta{};
+    double timePool{};
+    int frameNumber{};
+    EM_BOOL running{ EM_TRUE };
+
+    template<bool enableDPR = false>
     void GLInit() {
-        double dpr = emscripten_get_device_pixel_ratio();
-        emscripten_set_element_css_size("canvas", w / dpr, h / dpr);
+        if constexpr (enableDPR) {
+            auto dpr = emscripten_get_device_pixel_ratio();
+            emscripten_set_element_css_size("canvas", w / dpr, h / dpr);
+        }
         emscripten_set_canvas_element_size("canvas", (int)w, (int)h);
 
         EmscriptenWebGLContextAttributes attrs;
@@ -650,7 +659,15 @@ struct EngineBase {
         shader.End();
     }
 
+
+    EngineBase();
 };
+
+inline EngineBase* gEngine{};
+
+inline EngineBase::EngineBase() {
+    gEngine = this;
+}
 
 
 /**********************************************************************************************************************************/
@@ -771,8 +788,8 @@ struct Quad : QuadInstanceData {
         color.a = 255 * a;
         return *this;
     }
-    Quad& Draw(EngineBase* eg) {
-        eg->shader.Draw(*tex, *this);
+    Quad& Draw() {
+        gEngine->shader.Draw(*tex, *this);
         return *this;
     }
 };
@@ -789,7 +806,7 @@ struct CharInfo {
 };
 
 struct CharPainter {
-    static constexpr int charSize = 32, canvasWidth = charSize * 1.5, canvasHeight = charSize;
+    static constexpr int charSize = 32, canvasWidth = charSize * 1.2, canvasHeight = charSize * 1.2;
     std::array<CharInfo, 256> bases;
     std::unordered_map<char32_t, CharInfo> extras;
 
@@ -831,21 +848,21 @@ struct CharPainter {
         }
     }
 
-    void Draw(EngineBase* eg, XY pos, std::u32string_view const& s) {
+    void Draw(XY pos, std::u32string_view const& s) {
         Quad q;
-        q.SetAnchor({0.f, 0.f });
+        q.SetAnchor({0.f, 0.58f });
         for (size_t i = 0; i < s.size(); ++i) {
             auto ci = Find(s[i]);
-            q.SetPosition(pos).SetTexture(ci.tex).Draw(eg);
+            q.SetPosition(pos).SetTexture(ci.tex).Draw();
             pos.x += ci.width;
         }
     }
 
-    void Draw(EngineBase* eg, XY const& pos, std::string_view const& s) {
-        Draw(eg, pos, xx::StringU8ToU32(s));
+    void Draw(XY const& pos, std::string_view const& s) {
+        Draw(pos, xx::StringU8ToU32(s));
     }
 
-    float Measure(EngineBase* eg, std::u32string_view const& s) {
+    float Measure(std::u32string_view const& s) {
         float w{};
         for (size_t i = 0; i < s.size(); ++i) {
             w += Find(s[i]).width;
@@ -853,31 +870,30 @@ struct CharPainter {
         return w;
     }
 
-    float Measure(EngineBase* eg, std::string_view const& s) {
-        return Measure(eg, xx::StringU8ToU32(s));
+    float Measure(std::string_view const& s) {
+        return Measure(xx::StringU8ToU32(s));
     }
 };
 
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
-
 struct FpsViewer {
     double fpsTimePool{}, counter{}, fps{};
 
-    void Draw(EngineBase* eg, CharPainter& cp, double delta, XY const& pos) {
+    void Draw(CharPainter& cp) {
         ++counter;
-        fpsTimePool += delta;
+        fpsTimePool += gEngine->delta;
         if (fpsTimePool >= 1) {
             fpsTimePool -= 1;
             fps = counter;
             counter = 0;
         }
-        eg->shader.Commit();    // for calc drawCall & drawVerts
+        gEngine->shader.Commit();    // for calc drawCall & drawVerts
         auto s = std::string("FPS:") + std::to_string((uint32_t)fps)
-                 + " DC:" + std::to_string(Shader::drawCall)
-                 + " VC:" + std::to_string(Shader::drawVerts);
-        cp.Draw(eg, pos, s);
+                 + "💖DC:" + std::to_string(Shader::drawCall)
+                 + "💗VC:" + std::to_string(Shader::drawVerts);
+        cp.Draw({ -gEngine->w / 2, -gEngine->h / 2 + cp.canvasHeight / 2 }, s);
     }
 };
 
@@ -909,39 +925,39 @@ struct FrameBuffer {
     }
 
     template<typename Func>
-    void DrawTo(EngineBase* eg, xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c, Func&& func) {
-        Begin(eg, t, c);
+    void DrawTo(xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c, Func&& func) {
+        Begin(t, c);
         func();
-        End(eg);
+        End();
     }
 
     template<typename Func>
-    xx::Shared<GLTexture> Draw(EngineBase* eg, Vec2<uint32_t> const& wh, bool const& hasAlpha, std::optional<RGBA8> const& c, Func&& func) {
+    xx::Shared<GLTexture> Draw(Vec2<uint32_t> const& wh, bool const& hasAlpha, std::optional<RGBA8> const& c, Func&& func) {
         auto t = MakeTexture(wh, hasAlpha);
-        DrawTo(eg, t, c, std::forward<Func>(func));
+        DrawTo(t, c, std::forward<Func>(func));
         return t;
     }
 
 protected:
-    void Begin(EngineBase* eg, xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c = {}) {
-        eg->shader.End();
-        bak.x = eg->w;
-        bak.y = eg->h;
-        eg->w = t->Width();
-        eg->h = t->Height();
+    void Begin(xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c = {}) {
+        gEngine->shader.End();
+        bak.x = gEngine->w;
+        bak.y = gEngine->h;
+        gEngine->w = t->Width();
+        gEngine->h = t->Height();
         BindGLFrameBufferTexture(fb, *t);
-        eg->GLViewport();
+        gEngine->GLViewport();
         if (c.has_value()) {
-            eg->GLClear(c.value());
+            gEngine->GLClear(c.value());
         }
-        eg->shader.Begin(eg->w, eg->h);
+        gEngine->shader.Begin(gEngine->w, gEngine->h);
     }
-    void End(EngineBase* eg) {
-        eg->shader.End();
+    void End() {
+        gEngine->shader.End();
         UnbindGLFrameBuffer();
-        eg->w = bak.x;
-        eg->h = bak.y;
-        eg->GLViewport();
+        gEngine->w = bak.x;
+        gEngine->h = bak.y;
+        gEngine->GLViewport();
     }
 };
 
@@ -956,12 +972,6 @@ template<typename T> concept Has_Draw = requires(T t) { t.Draw(); };
 
 template<typename Derived>
 struct Engine : EngineBase {
-    static constexpr float fps = 60, frameDelay = 1.f / fps, maxFrameDelay = frameDelay * 3;
-
-    double nowSecs{}, delta{};
-    double timePool{};
-    int frameNumber{};
-    EM_BOOL running{ EM_TRUE };
     xx::Tasks tasks;
 
     Engine() {

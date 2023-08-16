@@ -1,9 +1,11 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 struct GameLooper : Engine<GameLooper> {
     CharPainter cp;
     FpsViewer fv;
     xx::Shared<GLTexture> tex;
+    std::u32string_view str = U"🚫💘💓💔💕💖💗💙💚💛💜💝💞💟"sv;
+    float strWidth{};
 
     void Init() {
         w = 1280;
@@ -12,11 +14,10 @@ struct GameLooper : Engine<GameLooper> {
             cp.Init();
 
             // fill tex
-            auto str = U"💘💓💔💕💖💗💙💚💛💜💝💞💟";
-            auto strWidth = cp.Measure(this, str);
-            tex = FrameBuffer::MakeTexture({(uint32_t)strWidth, 128});
-            FrameBuffer(true).DrawTo(this, tex, RGBA8{111,111,111,111}, [&]{
-                cp.Draw(this, {-strWidth / 2, 0}, str);
+            strWidth = cp.Measure(str);
+            tex = FrameBuffer::MakeTexture({(uint32_t)strWidth, (uint32_t)cp.canvasHeight});
+            FrameBuffer(true).DrawTo(tex, RGBA8{111,111,111,111}, [&]{
+                cp.Draw({-strWidth / 2, 0}, str);
             });
 
             co_return;
@@ -25,10 +26,12 @@ struct GameLooper : Engine<GameLooper> {
 
     void Draw() {
         // draw tex
-        Quad().SetTexture(tex).Draw(this);
+        Quad().SetTexture(tex).Draw();
+
+        cp.Draw({ -strWidth / 2, 100 }, U"🚫💘💓💔💕💖💗💙💚💛💜💝💞💟");
 
         // draw fps
-        fv.Draw(this, cp, delta, { -w / 2, -h / 2});
+        fv.Draw(cp);
     }
 };
 
@@ -39,3 +42,4 @@ int main() {
         return gLooper.JsLoopCallback(ms);
     }, nullptr);
 }
+ 

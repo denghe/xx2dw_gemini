@@ -8,6 +8,7 @@ mergeInto(LibraryManager.library, {
       var ctx = canvas.getContext('2d');
       ctx.globalAlpha = 1;
       ctx.fillStyle = 'white';
+      ctx.textBaseline = "middle";
       window['gCanvas'] = canvas;
       window['gCanvasCtx'] = ctx;
     }
@@ -17,10 +18,10 @@ mergeInto(LibraryManager.library, {
     var canvas = window['gCanvas'];
     var ctx = window['gCanvasCtx'];
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = charSize + 'px Consolas';
+    ctx.font = charSize + 'px monospace';
     var str = UTF8ToString(utf8Char);
     var strPixelWidth = ctx.measureText(str).width;
-    ctx.fillText(str, 0, canvas.height);
+    ctx.fillText(str, 0, canvas.height / 2);
     GLctx.texImage2D(GLctx.TEXTURE_2D, 0, GLctx.RGBA, GLctx.RGBA, GLctx.UNSIGNED_BYTE, canvas);
     return strPixelWidth;
   },
