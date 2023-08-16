@@ -11,7 +11,8 @@
 
 // code at library_js.js
 extern "C" {
-void upload_unicode_char_to_texture(int unicodeChar, int charWidth, int charHeight, int applyShadow);
+void init_canvas_for_char(int charWidth, int charHeight);
+void upload_unicode_char_to_texture(int unicodeChar);
 void load_texture_from_url(GLuint texture, const char *url, int *outWidth, int *outHeight);
 }
 
@@ -718,13 +719,14 @@ struct Quad : QuadInstanceData {
 
 struct FpsViewer {
     std::array<xx::Shared<GLTexture>, 256> charTexs;
-    static constexpr int charWidth = 64, charHeight = charWidth * 1.5;
+    static constexpr int charWidth = 32, charHeight = charWidth * 1.5;
     double fpsTimePool{}, counter{}, fps{};
 
     void Init() {
+        init_canvas_for_char(charWidth, charHeight);
         for (size_t c = 0; c < 256; ++c) {
             charTexs[c] = xx::Make<GLTexture>(GLGenTextures<false>(), charWidth, charHeight, std::to_string(c));
-            upload_unicode_char_to_texture(c, charWidth, charHeight, true);
+            upload_unicode_char_to_texture(c);
         }
     }
     void Draw(double delta, XY const& pos, Shader_QuadInstance& shader) {
