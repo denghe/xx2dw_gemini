@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.10)
 
+if(MSVC)
+	# Must be called before project call
+	set(CMAKE_GENERATOR_TOOLSET "ClangCL")
+endif()
+
 # Default to release build if not specified
 if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel." FORCE)
@@ -90,6 +95,15 @@ file(GLOB_RECURSE sources
 	src/*.h
 )
 add_executable(gemini ${sources})
+
+if(MSVC)
+	include_directories(
+		$ENV{EMSDK}/upstream/emscripten/system/lib/libcxx/include
+		$ENV{EMSDK}/upstream/emscripten/system/include
+		$ENV{EMSDK}/upstream/emscripten/system/lib/libc/musl/include
+		$ENV{EMSDK}/upstream/emscripten/system/lib/libc/musl/arch/emscripten
+	)
+endif()
 
 include_directories(
 	xxlib
