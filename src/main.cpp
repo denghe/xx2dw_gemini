@@ -1,5 +1,70 @@
 ﻿#include "pch.h"
 
+struct CharTexInfo {
+    xx::Shared<GLTexture> tex;
+    Rect rect;
+};
+
+struct CharTexCache {
+    constexpr static float texWidth = 4096, texHeight = 4096;
+    std::vector<xx::Shared<GLTexture>> texs;
+    float px{}, py{};
+
+    static constexpr int charSize = 32, canvasWidth = charSize * 1.2, canvasHeight = charSize * 1.2;
+    std::array<CharTexInfo, 256> bases;
+    std::unordered_map<char32_t, CharTexInfo> extras;
+
+    // need ogl frame env
+    void Init() {
+        init_gCanvas(canvasWidth, canvasHeight);
+        
+        texs.emplace_back(FrameBuffer::MakeTexture({ (uint32_t)texWidth, (uint32_t)texHeight }));
+
+        char buf[16];
+        for (char32_t c = 0; c < 256; ++c) {
+            MakeCharInfo(c);
+        }
+    }
+
+    CharTexInfo& MakeCharInfo(char32_t c) {
+        auto& t = texs.back();
+
+        char buf[16];
+        buf[xx::Char32ToUtf8(c, buf)] = '\0';
+        auto ct = xx::Make<GLTexture>(GLGenTextures<false>(), canvasWidth, canvasHeight, std::to_string((int)c));
+
+
+
+
+        //CharTexInfo ci;
+        //ci.rect.wh.x = upload_unicode_char_to_texture(charSize, buf);
+        //ci.rect.wh.y = canvasHeight;
+
+        
+        //if (c < 256) {
+        //    bases[c] = std::move(ci);
+        //    return bases[c];
+        //} else {
+        //    auto rtv = extras.insert(std::make_pair(c, std::move(ci)));
+        //    return rtv.first->second;
+        //}
+    }
+
+    CharTexInfo& Find(char32_t c) {
+        CharTexInfo* ci;
+        if (c < 256) {
+            return bases[c];
+        } else {
+            if (auto iter = extras.find(c); iter != extras.end()) {
+                return iter->second;
+            } else {
+                return MakeCharInfo(c);
+            }
+        }
+    }
+
+};
+
 struct GameLooper : Engine<GameLooper> {
     CharPainter cp;
     FpsViewer fv;
@@ -42,4 +107,3 @@ int main() {
         return gLooper.JsLoopCallback(ms);
     }, nullptr);
 }
- 

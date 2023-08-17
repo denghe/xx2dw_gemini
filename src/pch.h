@@ -604,7 +604,7 @@ void main() {
 struct EngineBase {
     inline static float w = 800, h = 600;          // can change at Init()
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE glContext;
-    double devicePixelRatio{};
+    float flipY{ 1 };   // -1: flip  for ogl frame buffer
     Shader_QuadInstance shader;
 
     static constexpr float fps = 60, frameDelay = 1.f / fps, maxFrameDelay = frameDelay * 3;
@@ -613,14 +613,8 @@ struct EngineBase {
     int frameNumber{};
     EM_BOOL running{ EM_TRUE };
 
-    template<bool enableDPR = false>
     void GLInit() {
-        if constexpr (enableDPR) {
-            auto dpr = emscripten_get_device_pixel_ratio();
-            emscripten_set_element_css_size("canvas", w / dpr, h / dpr);
-        }
         emscripten_set_canvas_element_size("canvas", (int)w, (int)h);
-
         EmscriptenWebGLContextAttributes attrs;
         emscripten_webgl_init_context_attributes(&attrs);
         attrs.alpha = 0;
@@ -641,10 +635,10 @@ struct EngineBase {
 
     void GLClear(RGBA8 c) {
         glClearColor(c.r / 255.f, c.g / 255.f, c.b / 255.f, c.a / 255.f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        //glDepthMask(true);
-        //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        //glDepthMask(false);
+        //glClear(GL_COLOR_BUFFER_BIT);
+        glDepthMask(true);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glDepthMask(false);
     }
 
     void GLUpdate() {
@@ -652,7 +646,15 @@ struct EngineBase {
         GLClear({});
 
         Shader::ClearCounter();
-        shader.Begin(w, h);
+        GLShaderBegin();
+    }
+
+    void GLShaderBegin() {
+        shader.Begin(w, h * flipY);
+    }
+
+    void GLShaderEnd() {
+        shader.End();
     }
 
     void GLUpdateEnd() {
@@ -850,7 +852,7 @@ struct CharPainter {
 
     void Draw(XY pos, std::u32string_view const& s) {
         Quad q;
-        q.SetAnchor({0.f, 0.58f });
+        q.SetAnchor({0.f, 0.5f });
         for (size_t i = 0; i < s.size(); ++i) {
             auto ci = Find(s[i]);
             q.SetPosition(pos).SetTexture(ci.tex).Draw();
@@ -889,10 +891,13 @@ struct FpsViewer {
             fps = counter;
             counter = 0;
         }
-        gEngine->shader.Commit();    // for calc drawCall & drawVerts
+
+        gEngine->GLShaderEnd();
         auto s = std::string("FPS:") + std::to_string((uint32_t)fps)
                  + "💖DC:" + std::to_string(Shader::drawCall)
                  + "💗VC:" + std::to_string(Shader::drawVerts);
+        gEngine->GLShaderBegin();
+
         cp.Draw({ -gEngine->w / 2, -gEngine->h / 2 + cp.canvasHeight / 2 }, s);
     }
 };
@@ -940,24 +945,27 @@ struct FrameBuffer {
 
 protected:
     void Begin(xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c = {}) {
-        gEngine->shader.End();
+        gEngine->GLShaderEnd();
         bak.x = gEngine->w;
         bak.y = gEngine->h;
         gEngine->w = t->Width();
         gEngine->h = t->Height();
+        gEngine->flipY = -1;
         BindGLFrameBufferTexture(fb, *t);
         gEngine->GLViewport();
         if (c.has_value()) {
             gEngine->GLClear(c.value());
         }
-        gEngine->shader.Begin(gEngine->w, gEngine->h);
+        gEngine->GLShaderBegin();
     }
     void End() {
-        gEngine->shader.End();
+        gEngine->GLShaderEnd();
         UnbindGLFrameBuffer();
         gEngine->w = bak.x;
         gEngine->h = bak.y;
+        gEngine->flipY = 1;
         gEngine->GLViewport();
+        gEngine->GLShaderBegin();
     }
 };
 
