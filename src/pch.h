@@ -911,19 +911,20 @@ struct CharTexCache {
             ci = &rtv.first->second;
         }
 
+        float cw = ct->Width(), ch = ct->Height();
         auto cp = p;
-        if (p.x + ct->Width() > texWidth) {         // line wrap
+        if (p.x + cw > texWidth) {                  // line wrap
             cp.x = 0;
-            p.x = ct->Width();
-            if (p.y - ct->Height() < 0) {           // new page
+            p.x = cw;
+            if (p.y - ch < 0) {                     // new page
                 texs.emplace_back(FrameBuffer::MakeTexture({ (uint32_t)texWidth, (uint32_t)texHeight }));
                 p.y = cp.y = texHeight - 1;
             } else {                                // new line
-                p.y -= ct->Height();
+                p.y -= ch;
                 cp.y = p.y;
             }
         } else {                                    // current line
-            p.x += ct->Width();
+            p.x += cw;
         }
 
         auto& t = texs.back();
@@ -934,8 +935,8 @@ struct CharTexCache {
         ci->tex = t;
         ci->texRectX = cp.x;
         ci->texRectY = texHeight - 1 - cp.y;        // flip y for uv
-        ci->texRectW = ct->Width();
-        ci->texRectH = ct->Height();
+        ci->texRectW = cw;
+        ci->texRectH = ch;
         return *ci;
     }
 
