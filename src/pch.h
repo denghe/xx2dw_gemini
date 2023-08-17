@@ -675,6 +675,73 @@ inline EngineBase::EngineBase() {
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
+struct FrameBuffer {
+    GLFrameBuffer fb;
+    XY bak{};
+
+    // need ogl frame env
+    explicit FrameBuffer(bool autoInit = false) {
+        if (autoInit) {
+            Init();
+        }
+    }
+
+    // need ogl frame env
+    FrameBuffer& Init() {
+        if (fb) {
+            throw std::logic_error("excessive initializations ?");
+        }
+        fb = MakeGLFrameBuffer();
+        return *this;
+    }
+
+    inline static xx::Shared<GLTexture> MakeTexture(Vec2<uint32_t> const& wh, bool const& hasAlpha = true) {
+        return xx::Make<GLTexture>(MakeGLFrameBufferTexture(wh.x, wh.y, hasAlpha));
+    }
+
+    template<typename Func>
+    void DrawTo(xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c, Func&& func) {
+        Begin(t, c);
+        func();
+        End();
+    }
+
+    template<typename Func>
+    xx::Shared<GLTexture> Draw(Vec2<uint32_t> const& wh, bool const& hasAlpha, std::optional<RGBA8> const& c, Func&& func) {
+        auto t = MakeTexture(wh, hasAlpha);
+        DrawTo(t, c, std::forward<Func>(func));
+        return t;
+    }
+
+protected:
+    void Begin(xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c = {}) {
+        gEngine->GLShaderEnd();
+        bak.x = gEngine->w;
+        bak.y = gEngine->h;
+        gEngine->w = t->Width();
+        gEngine->h = t->Height();
+        gEngine->flipY = -1;
+        BindGLFrameBufferTexture(fb, *t);
+        gEngine->GLViewport();
+        if (c.has_value()) {
+            gEngine->GLClear(c.value());
+        }
+        gEngine->GLShaderBegin();
+    }
+    void End() {
+        gEngine->GLShaderEnd();
+        UnbindGLFrameBuffer();
+        gEngine->w = bak.x;
+        gEngine->h = bak.y;
+        gEngine->flipY = 1;
+        gEngine->GLViewport();
+        gEngine->GLShaderBegin();
+    }
+};
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
 // sprite frame
 struct Frame {
     xx::Shared<GLTexture> tex;
@@ -799,16 +866,17 @@ struct Quad : QuadInstanceData {
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
-
-// todo: runtime combine to big texture
-
 struct CharInfo {
     xx::Shared<GLTexture> tex;
-    float width{};
+    uint16_t texRectX{}, texRectY{}, texRectW{}, texRectH{};
 };
 
-struct CharPainter {
-    static constexpr int charSize = 32, canvasWidth = charSize * 1.2, canvasHeight = charSize * 1.2;
+struct CharTexCache {
+    constexpr static float texWidth = 2048, texHeight = 2048;
+    std::vector<xx::Shared<GLTexture>> texs;
+    XY p{ 0, texHeight - 1 };
+
+    static constexpr int charSize = 24, canvasWidth = 32, canvasHeight = 32;
     std::array<CharInfo, 256> bases;
     std::unordered_map<char32_t, CharInfo> extras;
 
@@ -816,25 +884,59 @@ struct CharPainter {
     void Init() {
         init_gCanvas(canvasWidth, canvasHeight);
 
+        texs.emplace_back(FrameBuffer::MakeTexture({ (uint32_t)texWidth, (uint32_t)texHeight }));
+
         char buf[16];
         for (char32_t c = 0; c < 256; ++c) {
             MakeCharInfo(c);
         }
     }
 
-    CharInfo& MakeCharInfo(char32_t c) {
+    xx::Shared<GLTexture> MakeCharTex(char32_t c) {
+        assert(!Exists(c));
         char buf[16];
-        CharInfo ci;
-        ci.tex = xx::Make<GLTexture>(GLGenTextures<false>(), canvasWidth, canvasHeight, std::to_string((int) c));
         buf[xx::Char32ToUtf8(c, buf)] = '\0';
-        ci.width = upload_unicode_char_to_texture(charSize, buf);
+        auto ct = xx::Make<GLTexture>(GLGenTextures<false>(), canvasWidth, canvasHeight, std::to_string((int)c));
+        std::get<1>(ct->vs) = upload_unicode_char_to_texture(charSize, buf);
+        return ct;
+    }
+
+    CharInfo& MakeCharInfo(char32_t c) {
+        auto ct = MakeCharTex(c);
+        CharInfo* ci{};
         if (c < 256) {
-            bases[c] = std::move(ci);
-            return bases[c];
+            ci = &bases[c];
         } else {
-            auto rtv = extras.insert(std::make_pair(c, std::move(ci)));
-            return rtv.first->second;
+            auto rtv = extras.insert(std::make_pair(c, CharInfo{}));
+            ci = &rtv.first->second;
         }
+
+        auto cp = p;
+        if (p.x + ct->Width() > texWidth) {         // line wrap
+            cp.x = 0;
+            p.x = ct->Width();
+            if (p.y - ct->Height() < 0) {           // new page
+                texs.emplace_back(FrameBuffer::MakeTexture({ (uint32_t)texWidth, (uint32_t)texHeight }));
+                p.y = cp.y = texHeight - 1;
+            } else {                                // new line
+                p.y -= ct->Height();
+                cp.y = p.y;
+            }
+        } else {                                    // current line
+            p.x += ct->Width();
+        }
+
+        auto& t = texs.back();
+        FrameBuffer(true).DrawTo(t, {}, [&]() {
+            Quad().SetAnchor({0, 1}).SetPosition(cp + XY{-texWidth / 2, -texHeight / 2}).SetTexture(ct).Draw();
+        });
+
+        ci->tex = t;
+        ci->texRectX = cp.x;
+        ci->texRectY = texHeight - 1 - cp.y;        // flip y for uv
+        ci->texRectW = ct->Width();
+        ci->texRectH = ct->Height();
+        return *ci;
     }
 
     CharInfo& Find(char32_t c) {
@@ -850,13 +952,25 @@ struct CharPainter {
         }
     }
 
+    bool Exists(char32_t c) const {
+        CharInfo* ci;
+        if (c < 256) return true;
+        auto iter = extras.find(c);
+        return iter != extras.end();
+    }
+
     void Draw(XY pos, std::u32string_view const& s) {
         Quad q;
-        q.SetAnchor({0.f, 0.5f });
+        q.SetAnchor({ 0.f, 0.5f });
         for (size_t i = 0; i < s.size(); ++i) {
             auto ci = Find(s[i]);
-            q.SetPosition(pos).SetTexture(ci.tex).Draw();
-            pos.x += ci.width;
+            q.tex = ci.tex;
+            q.texRectX = ci.texRectX;
+            q.texRectY = ci.texRectY;
+            q.texRectW = ci.texRectW;
+            q.texRectH = ci.texRectH;
+            q.SetPosition(pos).Draw();
+            pos.x += ci.texRectW;
         }
     }
 
@@ -867,7 +981,7 @@ struct CharPainter {
     float Measure(std::u32string_view const& s) {
         float w{};
         for (size_t i = 0; i < s.size(); ++i) {
-            w += Find(s[i]).width;
+            w += Find(s[i]).texRectW;
         }
         return w;
     }
@@ -875,6 +989,7 @@ struct CharPainter {
     float Measure(std::string_view const& s) {
         return Measure(xx::StringU8ToU32(s));
     }
+
 };
 
 /**********************************************************************************************************************************/
@@ -883,7 +998,7 @@ struct CharPainter {
 struct FpsViewer {
     double fpsTimePool{}, counter{}, fps{};
 
-    void Draw(CharPainter& cp) {
+    void Draw(CharTexCache& cp) {
         ++counter;
         fpsTimePool += gEngine->delta;
         if (fpsTimePool >= 1) {
@@ -899,73 +1014,6 @@ struct FpsViewer {
         gEngine->GLShaderBegin();
 
         cp.Draw({ -gEngine->w / 2, -gEngine->h / 2 + cp.canvasHeight / 2 }, s);
-    }
-};
-
-/**********************************************************************************************************************************/
-/**********************************************************************************************************************************/
-
-struct FrameBuffer {
-    GLFrameBuffer fb;
-    XY bak{};
-
-    // need ogl frame env
-    explicit FrameBuffer(bool autoInit = false) {
-        if (autoInit) {
-            Init();
-        }
-    }
-
-    // need ogl frame env
-    FrameBuffer& Init() {
-        if (fb) {
-            throw std::logic_error("excessive initializations ?");
-        }
-        fb = MakeGLFrameBuffer();
-        return *this;
-    }
-
-    inline static xx::Shared<GLTexture> MakeTexture(Vec2<uint32_t> const& wh, bool const& hasAlpha = true) {
-        return xx::Make<GLTexture>(MakeGLFrameBufferTexture(wh.x, wh.y, hasAlpha));
-    }
-
-    template<typename Func>
-    void DrawTo(xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c, Func&& func) {
-        Begin(t, c);
-        func();
-        End();
-    }
-
-    template<typename Func>
-    xx::Shared<GLTexture> Draw(Vec2<uint32_t> const& wh, bool const& hasAlpha, std::optional<RGBA8> const& c, Func&& func) {
-        auto t = MakeTexture(wh, hasAlpha);
-        DrawTo(t, c, std::forward<Func>(func));
-        return t;
-    }
-
-protected:
-    void Begin(xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c = {}) {
-        gEngine->GLShaderEnd();
-        bak.x = gEngine->w;
-        bak.y = gEngine->h;
-        gEngine->w = t->Width();
-        gEngine->h = t->Height();
-        gEngine->flipY = -1;
-        BindGLFrameBufferTexture(fb, *t);
-        gEngine->GLViewport();
-        if (c.has_value()) {
-            gEngine->GLClear(c.value());
-        }
-        gEngine->GLShaderBegin();
-    }
-    void End() {
-        gEngine->GLShaderEnd();
-        UnbindGLFrameBuffer();
-        gEngine->w = bak.x;
-        gEngine->h = bak.y;
-        gEngine->flipY = 1;
-        gEngine->GLViewport();
-        gEngine->GLShaderBegin();
     }
 };
 
