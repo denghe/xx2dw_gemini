@@ -47,15 +47,16 @@ clion terminal window:
 cd cmake-build-????????
 emrun gemini.html
 
-# ide2 ( better for c++ because clion lag )
+# ide2 ( better for c++ because clion lag & keep use so many cpu )
 vs22 with llvm installed
 
 use cmake gui fill -T        ClangCL         generate .sln & open
 
 # build & browse
+in vs22, hot key : ctrl + `  open developer powershells:
 mkdir ?????
 cd ?????
-emcmake cmake ..
+emcmake cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo                      = Debug | Release | RelWithDebInfo
 emmake make -j24
 emrun gemini.html
 
