@@ -87,6 +87,13 @@ if (EMSCRIPTEN)
 
 	# Reduce code size: We do not need native POSIX filesystem emulation support (Emscripten FS/MEMFS)
 	append_linker_flags("-sFILESYSTEM=0")
+
+	if (${CMAKE_BUILD_TYPE} MATCHES "Rel*")
+	else()
+		# enable catch all exceptions
+		append_linker_flags("-sNO_DISABLE_EXCEPTION_CATCHING=1")
+	endif()
+
 endif()
 
 file(GLOB_RECURSE sources

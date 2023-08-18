@@ -3,6 +3,12 @@
 struct GameLooper : Engine<GameLooper> {
     CharTexCache ctc;
     FpsViewer fv;
+    XY mousePos;
+
+    EM_BOOL OnMouseMove(EmscriptenMouseEvent const& e) {
+        mousePos = { (float)e.targetX - w / 2, h - (float)e.targetY - h / 2 };
+        return EM_TRUE;
+    }
 
     void Init() {
         w = 600, h = 300;
@@ -14,10 +20,8 @@ struct GameLooper : Engine<GameLooper> {
     }
 
     void Draw() {
-        auto str = U"🚫💘💓💔💕💖💗💙💚💛💜💝💞💟"sv;
-        auto width = ctc.Measure(str);
-        ctc.Draw({ -width / 2, 0 }, str);        // draw text at center
-
+        // draw text at mouse pos
+        ctc.Draw(mousePos, U"🚫💘💓💔💕💖💗💙💚💛💜💝💞💟"sv);
         fv.Draw(ctc);       // draw fps at corner
     }
 };

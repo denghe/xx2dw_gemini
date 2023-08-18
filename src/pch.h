@@ -23,6 +23,7 @@ void load_texture_from_url(GLuint texture, const char *url, int *outWidth, int *
 #ifndef NDEBUG
 inline void CheckGLErrorAt(const char* file, int line, const char* func) {
 		if (auto e = glGetError(); e != GL_NO_ERROR) {
+            std::cout << "glGetError() == " << e << std::endl;
 			throw std::runtime_error(std::string("OpenGL error: ") + file + std::to_string(line) + func);
 		}
 	}
@@ -116,6 +117,7 @@ GLuint GLGenTextures() {
     if constexpr(exitBind0) {
         glBindTexture(GL_TEXTURE_2D, 0);
     }
+    //std::cout << "GLGenTextures t = " << t << std::endl;
     return t;
 }
 
@@ -133,8 +135,16 @@ struct GLTexture : GLRes<GLResTypes::Texture, GLsizei, GLsizei, std::string> {
     auto const& Width() const { return std::get<1>(vs); }
     auto const& Height() const { return std::get<2>(vs); }
     auto const& FileName() const { return std::get<3>(vs); }
-};
 
+    template<GLuint filter = GL_NEAREST /* GL_LINEAR */, GLuint wraper = GL_CLAMP_TO_EDGE /* GL_REPEAT */>
+    static GLTexture Create(uint32_t const& w, uint32_t const& h, bool const& hasAlpha) {
+        auto t = GLGenTextures<false, filter, wraper>();
+        auto c = hasAlpha ? GL_RGBA : GL_RGB;
+        glTexImage2D(GL_TEXTURE_2D, 0, c, w, h, 0, c, GL_UNSIGNED_BYTE, {});
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return GLTexture(t, w, h, "");
+    }
+};
 
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
@@ -205,17 +215,7 @@ inline GLFrameBuffer MakeGLFrameBuffer() {
     GLuint f{};
     glGenFramebuffers(1, &f);
     glBindFramebuffer(GL_FRAMEBUFFER, f);
-    CheckGLError();
-    return GLFrameBuffer(f);
-}
-
-template<GLuint filter = GL_NEAREST /* GL_LINEAR */, GLuint wraper = GL_CLAMP_TO_EDGE /* GL_REPEAT */>
-GLTexture MakeGLFrameBufferTexture(uint32_t const& w, uint32_t const& h, bool const& hasAlpha) {
-    auto t = GLGenTextures<false, filter, wraper>();
-    auto c = hasAlpha ? GL_RGBA : GL_RGB;
-    glTexImage2D(GL_TEXTURE_2D, 0, c, w, h, 0, c, GL_UNSIGNED_BYTE, {});
-    glBindTexture(GL_TEXTURE_2D, 0);
-    return GLTexture(t, w, h, "");
+    return GLFrameBuffer(f);    // not complete
 }
 
 inline void BindGLFrameBufferTexture(GLuint const& f, GLuint const& t) {
@@ -573,6 +573,9 @@ void main() {
 
         glBindTexture(GL_TEXTURE_2D, lastTextureId);
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, quadCount);
+
+        //auto fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        //std::cout << "fboStatus = " << fboStatus << " lastTextureId = " << lastTextureId << std::endl;
         CheckGLError();
 
         drawVerts += quadCount * 6;
@@ -696,7 +699,7 @@ struct FrameBuffer {
     }
 
     inline static xx::Shared<GLTexture> MakeTexture(Vec2<uint32_t> const& wh, bool const& hasAlpha = true) {
-        return xx::Make<GLTexture>(MakeGLFrameBufferTexture(wh.x, wh.y, hasAlpha));
+        return xx::Make<GLTexture>(GLTexture::Create(wh.x, wh.y, hasAlpha));
     }
 
     template<typename Func>
@@ -716,10 +719,8 @@ struct FrameBuffer {
 protected:
     void Begin(xx::Shared<GLTexture>& t, std::optional<RGBA8> const& c = {}) {
         gEngine->GLShaderEnd();
-        bak.x = gEngine->w;
-        bak.y = gEngine->h;
-        gEngine->w = t->Width();
-        gEngine->h = t->Height();
+        bak.x = std::exchange(gEngine->w, t->Width());
+        bak.y = std::exchange(gEngine->h, t->Height());
         gEngine->flipY = -1;
         BindGLFrameBufferTexture(fb, *t);
         gEngine->GLViewport();
@@ -874,6 +875,8 @@ struct CharInfo {
 struct CharTexCache {
     constexpr static float texWidth = 2048, texHeight = 2048;
     std::vector<xx::Shared<GLTexture>> texs;
+    xx::Shared<GLTexture> ct;
+    float cw{};
     XY p{ 0, texHeight - 1 };
 
     static constexpr int charSize = 24, canvasWidth = 32, canvasHeight = 32;
@@ -885,6 +888,7 @@ struct CharTexCache {
         init_gCanvas(canvasWidth, canvasHeight);
 
         texs.emplace_back(FrameBuffer::MakeTexture({ (uint32_t)texWidth, (uint32_t)texHeight }));
+        ct = xx::Make<GLTexture>(GLGenTextures<true>(), canvasWidth, canvasHeight, "");
 
         char buf[16];
         for (char32_t c = 0; c < 256; ++c) {
@@ -892,17 +896,16 @@ struct CharTexCache {
         }
     }
 
-    xx::Shared<GLTexture> MakeCharTex(char32_t c) {
-        assert(!Exists(c));
+    void FillCharTex(char32_t c) {
         char buf[16];
         buf[xx::Char32ToUtf8(c, buf)] = '\0';
-        auto ct = xx::Make<GLTexture>(GLGenTextures<false>(), canvasWidth, canvasHeight, std::to_string((int)c));
-        std::get<1>(ct->vs) = upload_unicode_char_to_texture(charSize, buf);
-        return ct;
+        glBindTexture(GL_TEXTURE_2D, *ct);
+        cw = upload_unicode_char_to_texture(charSize, buf);
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
 
     CharInfo& MakeCharInfo(char32_t c) {
-        auto ct = MakeCharTex(c);
+        FillCharTex(c);
         CharInfo* ci{};
         if (c < 256) {
             ci = &bases[c];
@@ -911,16 +914,15 @@ struct CharTexCache {
             ci = &rtv.first->second;
         }
 
-        float cw = ct->Width(), ch = ct->Height();
         auto cp = p;
         if (p.x + cw > texWidth) {                  // line wrap
             cp.x = 0;
             p.x = cw;
-            if (p.y - ch < 0) {                     // new page
+            if (p.y - canvasHeight < 0) {                     // new page
                 texs.emplace_back(FrameBuffer::MakeTexture({ (uint32_t)texWidth, (uint32_t)texHeight }));
                 p.y = cp.y = texHeight - 1;
             } else {                                // new line
-                p.y -= ch;
+                p.y -= canvasHeight;
                 cp.y = p.y;
             }
         } else {                                    // current line
@@ -936,12 +938,11 @@ struct CharTexCache {
         ci->texRectX = cp.x;
         ci->texRectY = texHeight - 1 - cp.y;        // flip y for uv
         ci->texRectW = cw;
-        ci->texRectH = ch;
+        ci->texRectH = canvasHeight;
         return *ci;
     }
 
     CharInfo& Find(char32_t c) {
-        CharInfo* ci;
         if (c < 256) {
             return bases[c];
         } else {
@@ -953,18 +954,20 @@ struct CharTexCache {
         }
     }
 
-    bool Exists(char32_t c) const {
-        CharInfo* ci;
-        if (c < 256) return true;
-        auto iter = extras.find(c);
-        return iter != extras.end();
-    }
-
+    // anchor: {0, 0.5}   todo: anchor, max width limit ?
     void Draw(XY pos, std::u32string_view const& s) {
         Quad q;
         q.SetAnchor({ 0.f, 0.5f });
-        for (size_t i = 0; i < s.size(); ++i) {
-            auto ci = Find(s[i]);
+
+        // make sure all char texture exists ( avoid framebuffer incomplete issue )
+        auto cis = (CharInfo**)alloca(s.size() * sizeof(void*));
+        auto e = s.size();
+        for (size_t i = 0; i < e; ++i) {
+            cis[i] = &Find(s[i]);
+        }
+
+        for (size_t i = 0; i < e; ++i) {
+            auto&& ci = *cis[i];
             q.tex = ci.tex;
             q.texRectX = ci.texRectX;
             q.texRectY = ci.texRectY;
@@ -1010,8 +1013,8 @@ struct FpsViewer {
 
         gEngine->GLShaderEnd();
         auto s = std::string("FPS:") + std::to_string((uint32_t)fps)
-                 + "💖DC:" + std::to_string(Shader::drawCall)
-                 + "💗VC:" + std::to_string(Shader::drawVerts);
+                 + " DC:" + std::to_string(Shader::drawCall)
+                 + " VC:" + std::to_string(Shader::drawVerts);
         gEngine->GLShaderBegin();
 
         cp.Draw({ -gEngine->w / 2, -gEngine->h / 2 + cp.canvasHeight / 2 }, s);
@@ -1022,11 +1025,21 @@ struct FpsViewer {
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
-template<typename T> concept Has_Init = requires(T t) { t.Init(); };
-template<typename T> concept Has_AfterInit = requires(T t) { t.AfterInit(); };
-template<typename T> concept Has_Update = requires(T t) { t.Update(); };
-template<typename T> concept Has_Draw = requires(T t) { t.Draw(); };
+template<typename T> concept Has_Init = requires(T t) { { t.Init() } -> std::same_as<void>; };
+template<typename T> concept Has_AfterInit = requires(T t) { { t.AfterInit() } -> std::same_as<void>; };
+template<typename T> concept Has_Update = requires(T t) { { t.Update() } -> std::same_as<void>; };
+template<typename T> concept Has_Draw = requires(T t) { { t.Draw() } -> std::same_as<void>; };
 template <typename T> concept Has_MainTask = requires(T t) { { t.MainTask() } -> std::same_as<xx::Task<>>; };
+
+template <typename T> concept Has_OnMouseDown = requires(T t) { { t.OnMouseDown(std::declval<EmscriptenMouseEvent const&>()) } -> std::same_as<EM_BOOL>; };
+template <typename T> concept Has_OnMouseUp = requires(T t) { { t.OnMouseUp(std::declval<EmscriptenMouseEvent const&>()) } -> std::same_as<EM_BOOL>; };
+template <typename T> concept Has_OnClick = requires(T t) { { t.OnClick(std::declval<EmscriptenMouseEvent const&>()) } -> std::same_as<EM_BOOL>; };
+template <typename T> concept Has_OnDblClick = requires(T t) { { t.OnDblClick(std::declval<EmscriptenMouseEvent const&>()) } -> std::same_as<EM_BOOL>; };
+template <typename T> concept Has_OnMouseMove = requires(T t) { { t.OnMouseMove(std::declval<EmscriptenMouseEvent const&>()) } -> std::same_as<EM_BOOL>; };
+template <typename T> concept Has_OnMouseEnter = requires(T t) { { t.OnMouseEnter(std::declval<EmscriptenMouseEvent const&>()) } -> std::same_as<EM_BOOL>; };
+template <typename T> concept Has_OnMouseLeave = requires(T t) { { t.OnMouseLeave(std::declval<EmscriptenMouseEvent const&>()) } -> std::same_as<EM_BOOL>; };
+template <typename T> concept Has_OnMouseOver = requires(T t) { { t.OnMouseOver(std::declval<EmscriptenMouseEvent const&>()) } -> std::same_as<EM_BOOL>; };
+template <typename T> concept Has_OnMouseOut = requires(T t) { { t.OnMouseOut(std::declval<EmscriptenMouseEvent const&>()) } -> std::same_as<EM_BOOL>; };
 
 
 template<typename Derived>
@@ -1034,6 +1047,55 @@ struct Engine : EngineBase {
     xx::Tasks tasks;
 
     Engine() {
+        if constexpr (Has_OnMouseDown<Derived>) {
+            emscripten_set_mousedown_callback("canvas", this, true, [](int, const EmscriptenMouseEvent* e, void* ud)->EM_BOOL {
+                return ((Derived*)ud)->OnMouseDown(*e);
+            });
+        }
+        if constexpr (Has_OnMouseUp<Derived>) {
+            emscripten_set_mouseup_callback("canvas", this, true, [](int, const EmscriptenMouseEvent* e, void* ud)->EM_BOOL {
+                return ((Derived*)ud)->OnMouseUp(*e);
+            });
+        }
+        if constexpr (Has_OnClick<Derived>) {
+            emscripten_set_click_callback("canvas", this, true, [](int, const EmscriptenMouseEvent* e, void* ud)->EM_BOOL {
+                return ((Derived*)ud)->OnClick(*e);
+            });
+        }
+        if constexpr (Has_OnDblClick<Derived>) {
+            emscripten_set_dblclick_callback("canvas", this, true, [](int, const EmscriptenMouseEvent* e, void* ud)->EM_BOOL {
+                return ((Derived*)ud)->OnDblClick(*e);
+            });
+        }
+        if constexpr (Has_OnMouseMove<Derived>) {
+            emscripten_set_mousemove_callback("canvas", this, true, [](int, const EmscriptenMouseEvent* e, void* ud)->EM_BOOL {
+                return ((Derived*)ud)->OnMouseMove(*e);
+            });
+        }
+        if constexpr (Has_OnMouseEnter<Derived>) {
+            emscripten_set_mouseenter_callback("canvas", this, true, [](int, const EmscriptenMouseEvent* e, void* ud)->EM_BOOL {
+                return ((Derived*)ud)->OnMouseEnter(*e);
+            });
+        }
+        if constexpr (Has_OnMouseLeave<Derived>) {
+            emscripten_set_mouseleave_callback("canvas", this, true, [](int, const EmscriptenMouseEvent* e, void* ud)->EM_BOOL {
+                return ((Derived*)ud)->OnMouseLeave(*e);
+            });
+        }
+        if constexpr (Has_OnMouseOver<Derived>) {
+            emscripten_set_mouseover_callback("canvas", this, true, [](int, const EmscriptenMouseEvent* e, void* ud)->EM_BOOL {
+                return ((Derived*)ud)->OnMouseOver(*e);
+            });
+        }
+        if constexpr (Has_OnMouseOut<Derived>) {
+            emscripten_set_mouseout_callback("canvas", this, true, [](int, const EmscriptenMouseEvent* e, void* ud)->EM_BOOL {
+                return ((Derived*)ud)->OnMouseOut(*e);
+            });
+        }
+
+        //typedef EM_BOOL(*em_wheel_callback_func)(int eventType, const EmscriptenWheelEvent* wheelEvent, void* userData);
+        //emscripten_set_wheel_callback("canvas", this, true, ??????);
+
         if constexpr(Has_Init<Derived>) {
             ((Derived*)this)->Init();
         }
