@@ -1026,6 +1026,8 @@ template<typename T> concept Has_Init = requires(T t) { t.Init(); };
 template<typename T> concept Has_AfterInit = requires(T t) { t.AfterInit(); };
 template<typename T> concept Has_Update = requires(T t) { t.Update(); };
 template<typename T> concept Has_Draw = requires(T t) { t.Draw(); };
+template <typename T> concept Has_MainTask = requires(T t) { { t.MainTask() } -> std::same_as<xx::Task<>>; };
+
 
 template<typename Derived>
 struct Engine : EngineBase {
@@ -1039,6 +1041,10 @@ struct Engine : EngineBase {
 
         if constexpr(Has_AfterInit<Derived>) {
             ((Derived*)this)->AfterInit();
+        }
+
+        if constexpr (Has_MainTask<Derived>) {
+            tasks.Add(((Derived*)this)->MainTask());
         }
     }
 

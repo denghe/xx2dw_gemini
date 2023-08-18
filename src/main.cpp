@@ -5,27 +5,24 @@ struct GameLooper : Engine<GameLooper> {
     FpsViewer fv;
 
     void Init() {
-        w = 600;
-        h = 300;
-        tasks.Add([this]()->xx::Task<>{
-            ctc.Init();
-            co_return;
-        });
+        w = 600, h = 300;
+    }
+
+    xx::Task<> MainTask() {
+        ctc.Init();
+        co_return;
     }
 
     void Draw() {
-        // draw text
-        std::u32string_view str = U"🚫💘💓💔💕💖💗💙💚💛💜💝💞💟"sv;
-        auto strWidth = ctc.Measure(str);
-        ctc.Draw({ -strWidth / 2, 0 }, str);
+        auto str = U"🚫💘💓💔💕💖💗💙💚💛💜💝💞💟"sv;
+        auto width = ctc.Measure(str);
+        ctc.Draw({ -width / 2, 0 }, str);        // draw text at center
 
-        // draw fps
-        fv.Draw(ctc);
+        fv.Draw(ctc);       // draw fps at corner
     }
 };
 
-inline GameLooper gLooper;
-
+GameLooper gLooper;
 int main() {
     emscripten_request_animation_frame_loop([](double ms, void*)->EM_BOOL {
         return gLooper.JsLoopCallback(ms);

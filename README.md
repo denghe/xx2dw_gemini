@@ -36,6 +36,9 @@ File -- Settings -- Build, Execution, Deployment -- CMake -- Debug ( default min
 
 -DCMAKE_TOOLCHAIN_FILE=???????????\emsdk\upstream\emscripten\cmake\Modules\Platform\Emscripten.cmake
 
+more: ( ignore vs build dir )
+mouse right click on "dir", Mark Directory As -- Excluded
+
 # build
 click clion "hammer" icon
 
