@@ -5,9 +5,11 @@
 #include <xx_task.h>
 #include <xx_queue.h>
 #include <xx_string.h>
+#include <xx_data.h>
 
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
+#include <emscripten/fetch.h>
 #include <webgl/webgl2.h>
 
 // code at library_js.js
@@ -23,7 +25,7 @@ void load_texture_from_url(GLuint texture, const char *url, int *outWidth, int *
 #ifndef NDEBUG
 inline void CheckGLErrorAt(const char* file, int line, const char* func) {
 		if (auto e = glGetError(); e != GL_NO_ERROR) {
-            std::cout << "glGetError() == " << e << std::endl;
+            printf("glGetError() == %d\n", e);
 			throw std::runtime_error(std::string("OpenGL error: ") + file + std::to_string(line) + func);
 		}
 	}
@@ -117,7 +119,7 @@ GLuint GLGenTextures() {
     if constexpr(exitBind0) {
         glBindTexture(GL_TEXTURE_2D, 0);
     }
-    //std::cout << "GLGenTextures t = " << t << std::endl;
+    printf("GLGenTextures t = %d\n", t);
     return t;
 }
 
@@ -575,7 +577,7 @@ void main() {
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, quadCount);
 
         //auto fboStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-        //std::cout << "fboStatus = " << fboStatus << " lastTextureId = " << lastTextureId << std::endl;
+        //printf("fboStatus = %d lastTextureId = %d\n", fboStatus, lastTextureId);
         CheckGLError();
 
         drawVerts += quadCount * 6;
@@ -999,6 +1001,290 @@ struct CharTexCache {
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
+struct TexturePacker {
+    xx::Shared<GLTexture> tex;
+    std::vector<xx::Shared<Frame>> frames;
+    bool premultiplyAlpha;
+    std::string realTextureFileName;
+    std::string plistFullPath;
+
+    // fill by plist file's content
+    int Load(std::string_view text, std::string_view const& rootPath) {
+        frames.clear();
+        size_t i, j;
+
+        if (i = text.find(">frames<"sv); i == text.npos) return __LINE__;
+        CutStr(text, i + 19);													// skip    >frames</key><dict>
+
+        if (i = text.find("<key>"sv); i == text.npos) return __LINE__;
+        CutStr(text, i + 5);													// skip    <key>
+
+    LabBegin:
+        auto&& o = *frames.emplace_back().Emplace();
+        if (j = text.find('<'); j == text.npos) return __LINE__;				// </key>
+        o.key = CutStr(text, 0, j);
+        CutStr(text, j + 30);													// skip    </key><dict><key>aliases</key>
+
+        if (i = text.find("/>"sv); i == text.npos) return __LINE__;				// <array/>
+        CutStr(text, i + 2);													// skip    <array/>
+
+        if (i = text.find('<'); i == text.npos) return __LINE__;
+        CutStr(text, i + 5);													// skip    <key>
+
+        if (text.starts_with('a')) {											// anchor
+            CutStr(text, 20);													// skip    anchor</key><string>
+
+            if (i = text.find('{'); i == text.npos) return __LINE__;
+            if (j = text.find('}', i + 4); j == text.npos) return __LINE__;
+            o.anchor.emplace();
+            if (ReadFloat2(CutStr(text, i + 1, j - i - 1), o.anchor->x, o.anchor->y)) return __LINE__;
+            CutStr(text, j + 10);												// skip    }</string>
+        }
+
+        if (i = text.find('{'); i == text.npos) return __LINE__;
+        if (j = text.find('}', i + 4); j == text.npos) return __LINE__;
+        if (ReadFloat2(CutStr(text, i + 1, j - i - 1), o.spriteOffset.x, o.spriteOffset.y)) return __LINE__;
+        CutStr(text, j + 10);													// skip    }</string>
+
+        if (i = text.find('{'); i == text.npos) return __LINE__;
+        if (j = text.find('}', i + 4); j == text.npos) return __LINE__;
+        if (ReadInteger2(CutStr(text, i + 1, j - i - 1), o.spriteSize.x, o.spriteSize.y)) return __LINE__;
+        CutStr(text, j + 10);													// skip    }</string>
+
+        if (i = text.find('{'); i == text.npos) return __LINE__;
+        if (j = text.find('}', i + 4); j == text.npos) return __LINE__;
+        if (ReadInteger2(CutStr(text, i + 1, j - i - 1), o.spriteSourceSize.x, o.spriteSourceSize.y)) return __LINE__;
+        CutStr(text, j + 10);													// skip    }</string>
+
+        if (i = text.find("{{"sv); i == text.npos) return __LINE__;
+        if (j = text.find("}}"sv, i + 10); j == text.npos) return __LINE__;
+        ReadInteger4(CutStr(text, i + 2, j - i - 2), o.textureRect.x, o.textureRect.y, o.textureRect.wh.x, o.textureRect.wh.y);
+        CutStr(text, j + 11);													// skip    }}</string>
+
+        if (i = text.find("</k"sv); i == text.npos) return __LINE__;			// <key>textureRotated</key>
+        CutStr(text, i + 6);													// skip    </key>
+
+        if (i = text.find('<'); i == text.npos) return __LINE__;				// locate <true || <false
+        CutStr(text, i + 1);													// skip    <
+
+        if (text.starts_with('t')) {
+            o.textureRotated = true;
+            CutStr(text, 6);													// skip    true/>
+        } else {
+            o.textureRotated = false;
+            CutStr(text, 7);													// skip    false/>
+        }
+
+        if (i = text.find("<k"sv); i == text.npos) return __LINE__;
+        CutStr(text, i + 5);													// skip    <key>
+
+        if (text.starts_with("triangles<"sv)) {
+            CutStr(text, 15);													// skip    triangles</key>
+
+            if (i = text.find('<'); i == text.npos) return __LINE__;			// <string>
+            if (j = text.find('<', i + 8); j == text.npos) return __LINE__;		// </string>
+            SpaceSplitFillVector(o.triangles, CutStr(text, i + 8, j - i - 8));
+
+            CutStr(text, j + 9);												// skip    </string>
+            if (i = text.find('<'); i == text.npos) return __LINE__;
+            CutStr(text, i + 19);												// skip    <key>vertices</key>
+
+            if (i = text.find('<'); i == text.npos) return __LINE__;			// <string>
+            if (j = text.find('<', i + 8); j == text.npos) return __LINE__;		// </string>
+            SpaceSplitFillVector(o.vertices, CutStr(text, i + 8, j - i - 8));
+
+            CutStr(text, j + 9);												// skip    </string>
+            if (i = text.find('<'); i == text.npos) return __LINE__;
+            CutStr(text, i + 21);												// skip    <key>verticesUV</key>
+
+            if (i = text.find('<'); i == text.npos) return __LINE__;			// <string>
+            if (j = text.find('<', i + 8); j == text.npos) return __LINE__;		// </string>
+            SpaceSplitFillVector(o.verticesUV, CutStr(text, i + 8, j - i - 8));
+
+            {
+                auto len = o.vertices.size() / 2;								// flip y for ogl
+                auto p = (XY*)o.vertices.data();
+                for (size_t k = 0; k < len; ++k) {
+                    p[k].y = o.spriteSize.y - p[k].y;
+                }
+            }
+
+            CutStr(text, j + 9);												// skip    </string>
+
+            if (i = text.find("<k"sv); i == text.npos) return __LINE__;
+            CutStr(text, i + 5);												// skip    <key>
+        }
+
+        if (!text.starts_with("metadata<"sv)) {									// <key>metadata</key>    ||    <key> frame name </key>
+            goto LabBegin;
+        }
+
+        CutStr(text, 20);														// skip    metadata</key><dict>
+
+        if (i = text.find(">pre"sv); i == text.npos) return __LINE__;			// <key>premultiplyAlpha</key>
+        CutStr(text, i + 23);													// skip    >premultiplyAlpha</key>
+
+        if (i = text.find('<'); i == text.npos) return __LINE__;				// locate <true || <false
+        CutStr(text, i + 1);													// skip    <
+
+        if (text.starts_with('t')) {
+            premultiplyAlpha = true;
+            CutStr(text, 6);													// skip    true/>
+        } else {
+            premultiplyAlpha = false;
+            CutStr(text, 7);													// skip    false/>
+        }
+
+        // realTextureFileName
+        if (i = text.find("<s"sv); i == text.npos) return __LINE__;				// <string> tex file name .ext
+        if (j = text.find('<', i + 8); j == text.npos) return __LINE__;			// </string>
+        realTextureFileName = rootPath;
+        realTextureFileName.append(CutStr(text, i + 8, j - i - 8));
+
+        return 0;
+    }
+
+    // get frame by key
+    xx::Shared<Frame> const& Get(std::string_view const& key) const {
+        for (auto& f : frames) {
+            if (f->key == key) return f;
+        }
+        throw std::logic_error(xx::ToString(key, " is not found in tp: ", plistFullPath));
+    }
+    xx::Shared<Frame> const& Get(char const* const& buf, size_t const& len) const {
+        return Get(std::string_view(buf, len));
+    }
+
+    // get frames by key's prefix + number. example: "p1 p2 p3" prefix is 'p'
+
+    std::vector<xx::Shared<Frame>> GetByPrefix(std::string_view const& prefix) const {
+        std::vector<xx::Shared<Frame>> fs;
+        GetToByPrefix(fs, prefix);
+        return fs;
+    }
+
+    void GetTo(std::vector<xx::Shared<Frame>>& fs, std::initializer_list<std::string_view> keys) const {
+        for (auto& k : keys) {
+            fs.push_back(Get(k));
+        }
+    }
+
+    size_t GetToByPrefix(std::vector<xx::Shared<Frame>>& fs, std::string_view const& prefix) const {
+        size_t n{};
+        for (auto& f : frames) {
+            if (f->key.starts_with(prefix)) {
+                auto s = f->key.substr(prefix.size());
+                if (s[0] >= '0' && s[0] <= '9') {
+                    fs.push_back(f);
+                    ++n;
+                }
+            }
+        }
+        return n;
+    }
+
+    xx::Shared<Frame> TryGet(std::string_view const& key) const {
+        for (auto& f : frames) {
+            if (f->key == key) return f;
+        }
+        return {};
+    }
+
+    std::unordered_map<std::string_view, xx::Shared<Frame>> GetMapSV() const {
+        std::unordered_map<std::string_view, xx::Shared<Frame>> fs;
+        for (auto& f : frames) {
+            fs[std::string_view(f->key)] = f;
+        }
+        return fs;
+    }
+
+    std::unordered_map<std::string, xx::Shared<Frame>> GetMapS() const {
+        std::unordered_map<std::string, xx::Shared<Frame>> fs;
+        for (auto& f : frames) {
+            fs[f->key] = f;
+        }
+        return fs;
+    }
+
+protected:
+
+    // format: a,b
+    template<typename T>
+    static int ReadFloat2(std::string_view const& line, T& a, T& b) {
+        auto dotPos = line.find(',', 1);
+        if (dotPos == std::string_view::npos) return __LINE__;
+#ifdef _MSVC
+        std::from_chars(line.data(), line.data() + dotPos, a);
+        std::from_chars(line.data() + dotPos + 1, line.data() + line.size(), b);
+#else
+        a = atof(std::string(line.substr(0, dotPos)).c_str());
+        b = atof(std::string(line.substr(dotPos + 1)).c_str());
+#endif
+        return 0;
+    }
+
+    template<bool check9 = false>
+    static int ReadInteger(const char*& p) {
+        int x = 0;
+        while (*p >= '0') {
+            if constexpr (check9) {
+                if (*p > '9') break;
+            }
+            x = (x * 10) + (*p - '0');
+            ++p;
+        }
+        return x;
+    }
+
+    // format: a,b
+    // ascii： ',' < '0~9' < '>}'
+    template<typename T>
+    static int ReadInteger2(std::string_view const& line, T& a, T& b) {
+        auto&& p = line.data();
+        a = (T)ReadInteger(p);
+        ++p;	// skip ','
+        b = (T)ReadInteger<true>(p);
+        return 0;
+    }
+
+    // format: a,b},{c,d
+    template<typename T>
+    static void ReadInteger4(std::string_view const& line, T& a, T& b, T& c, T& d) {
+        auto&& p = line.data();
+        a = (T)ReadInteger(p);
+        ++p;	// skip ','
+        b = (T)ReadInteger<true>(p);
+        p += 3;	// skip '},{'
+        c = (T)ReadInteger(p);
+        ++p;	// skip ','
+        d = (T)ReadInteger<true>(p);
+    }
+
+    // ' ' continue，'<' quit. ascii： ' ' < '0-9' < '<'
+    template<typename T>
+    static void SpaceSplitFillVector(std::vector<T>& vs, std::string_view const& line) {
+        vs.clear();
+        auto&& p = line.data();
+    LabBegin:
+        vs.push_back((T)ReadInteger<true>(p));
+        if (*p == ' ') {
+            ++p;
+            goto LabBegin;
+        }
+    }
+
+    // unsafe for speed up
+    XX_INLINE static void CutStr(std::string_view& sv, size_t const& i) {
+        sv = { sv.data() + i, sv.size() - i };
+    }
+    XX_INLINE static std::string_view CutStr(std::string_view const& sv, size_t const& i, size_t const& siz) {
+        return { sv.data() + i, siz };
+    }
+};
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
 struct FpsViewer {
     double fpsTimePool{}, counter{}, fps{};
 
@@ -1155,25 +1441,94 @@ int main() {
     template<bool showLog = false, int timeoutSeconds = 10>
     xx::Task<xx::Shared<GLTexture>> AsyncLoadTextureFromUrl(char const* url) {
         if constexpr(showLog) {
-            std::cout << "LoadTextureFromUrl( " << url << " ) : begin. nowSecs = " << nowSecs << std::endl;
+            printf("LoadTextureFromUrl( %s ) : begin. nowSecs = %f\n", url, nowSecs);
         }
         auto i = GLGenTextures<true>();
         int tw{}, th{};
         load_texture_from_url(i, url, &tw, &th);
         auto elapsedSecs = nowSecs + timeoutSeconds;
-        while(nowSecs < elapsedSecs) {
+        while (nowSecs < elapsedSecs) {
             co_yield 0;
             if (tw) {
                 if constexpr(showLog) {
-                    std::cout << "LoadTextureFromUrl( " << url << " ) : loaded. nowSecs = " << nowSecs << ", size = " << tw << "," << th << std::endl;
+                    printf("LoadTextureFromUrl( %s ) : loaded. nowSecs = %f, size = %d, %d\n", url, nowSecs, tw, th);
                 }
                 co_return xx::Make<GLTexture>(i, tw, th, url);
             }
         }
         if constexpr(showLog) {
-            std::cout << "LoadTextureFromUrl( " << url << " ) : timeout. timeoutSeconds = " << timeoutSeconds << std::endl;
+            printf("LoadTextureFromUrl( %s ) : timeout. timeoutSeconds = %d\n", url, timeoutSeconds);
         }
         co_return xx::Shared<GLTexture>{};
+    }
+
+    template<bool showLog = false, int timeoutSeconds = 10>
+    xx::Task<xx::Shared<xx::Data>> AsyncDownloadFromUrl(char const* url) {
+        emscripten_fetch_attr_t attr;
+        emscripten_fetch_attr_init(&attr);
+        strcpy(attr.requestMethod, "GET");
+        attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+
+        using UD = std::pair<bool*, xx::Shared<xx::Data>*>;
+
+        attr.onsuccess = [](emscripten_fetch_t* fetch) {
+            UD& ud = *(UD*)fetch->userData;
+            *ud.first = true;
+            ud.second->Emplace()->WriteBuf(fetch->data, fetch->numBytes);
+            emscripten_fetch_close(fetch);
+        };
+
+        attr.onerror = [](emscripten_fetch_t* fetch) {
+            UD& ud = *(UD*)fetch->userData;
+            *ud.first = true;
+            emscripten_fetch_close(fetch);
+        };
+
+        xx::Shared<xx::Data> sd;
+        bool callbacked = false;
+        UD ud = { &callbacked, &sd };
+        attr.userData = &ud;
+
+        emscripten_fetch(&attr, url);
+        
+        while (!callbacked) {
+            co_yield 0;
+        }
+        co_return sd;
+    }
+
+    xx::Task<xx::Shared<TexturePacker>> AsyncLoadTexturePackerFromUrl(char const* plistUrl) {
+        auto plistData = co_await AsyncDownloadFromUrl(plistUrl);
+        if (!plistData) co_return xx::Shared<TexturePacker>{};
+
+        auto tp = xx::Make<TexturePacker>();
+        auto& fp = tp->plistFullPath;
+        fp = plistUrl;
+        std::string rootPath;
+        if (auto&& i = fp.find_last_of("/"); i != fp.npos) {
+            rootPath = fp.substr(0, i + 1);
+        }
+
+        if (int r = tp->Load(*plistData, rootPath)) {
+            throw std::logic_error(xx::ToString("parse plist file content error: r = ", r, ", fn = ", fp));
+        }
+        std::sort(tp->frames.begin(), tp->frames.end(), [](xx::Shared<Frame> const& a, xx::Shared<Frame> const& b) {
+            return xx::InnerNumberToFixed(a->key) < xx::InnerNumberToFixed(b->key);
+        });
+
+        printf("tp->frames.size() == %d\n", (int)tp->frames.size());
+        printf("tex url = %s\n", tp->realTextureFileName.c_str());
+
+        tp->tex = co_await AsyncLoadTextureFromUrl<true>(tp->realTextureFileName.c_str());
+        if (!tp->tex) {
+            printf("asdfasdsf\n");
+            co_return xx::Shared<TexturePacker>{};
+        }
+        for (auto& f : tp->frames) {
+            f->tex = tp->tex;
+        }
+
+        co_return tp;
     }
 
 };
