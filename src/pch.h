@@ -6,6 +6,7 @@
 #include <xx_queue.h>
 #include <xx_string.h>
 #include <xx_data.h>
+#include <random>
 
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
@@ -1285,6 +1286,448 @@ protected:
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
+// reference from https://github.com/cslarsen/mersenne-twister
+// faster than std impl, can store & restore state data directly
+// ser/de data size == 5000 bytes
+struct Rnd {
+
+#pragma region impl
+    inline static const size_t SIZE = 624;
+    inline static const size_t PERIOD = 397;
+    inline static const size_t DIFF = SIZE - PERIOD;
+    inline static const uint32_t MAGIC = 0x9908b0df;
+
+    uint32_t MT[SIZE];
+    uint32_t MT_TEMPERED[SIZE];
+    size_t index = SIZE;
+    uint32_t seed;
+
+#define Random5_M32(x) (0x80000000 & x) // 32nd MSB
+#define Random5_L31(x) (0x7FFFFFFF & x) // 31 LSBs
+#define Random5_UNROLL(expr) \
+  y = Random5_M32(MT[i]) | Random5_L31(MT[i+1]); \
+  MT[i] = MT[expr] ^ (y >> 1) ^ (((int32_t(y) << 31) >> 31) & MAGIC); \
+  ++i;
+    void Generate() {
+        size_t i = 0;
+        uint32_t y;
+        while (i < DIFF) {
+            Random5_UNROLL(i + PERIOD);
+        }
+        while (i < SIZE - 1) {
+            Random5_UNROLL(i - DIFF);
+        }
+        {
+            y = Random5_M32(MT[SIZE - 1]) | Random5_L31(MT[0]);
+            MT[SIZE - 1] = MT[PERIOD - 1] ^ (y >> 1) ^ (((int32_t(y) << 31) >> 31) & MAGIC);
+        }
+        for (size_t i = 0; i < SIZE; ++i) {
+            y = MT[i];
+            y ^= y >> 11;
+            y ^= y << 7 & 0x9d2c5680;
+            y ^= y << 15 & 0xefc60000;
+            y ^= y >> 18;
+            MT_TEMPERED[i] = y;
+        }
+        index = 0;
+    }
+#undef Random5_UNROLL
+#undef Random5_L31
+#undef Random5_M32
+#pragma endregion
+
+    Rnd() {
+        SetSeed(std::random_device()());
+    }
+
+    void SetSeed(uint32_t const& seed) {
+        this->seed = seed;
+        MT[0] = seed;
+        index = SIZE;
+        for (uint_fast32_t i = 1; i < SIZE; ++i) {
+            MT[i] = 0x6c078965 * (MT[i - 1] ^ MT[i - 1] >> 30) + i;
+        }
+    }
+
+    uint32_t Get() {
+        if (index == SIZE) {
+            Generate();
+            index = 0;
+        }
+        return MT_TEMPERED[index++];
+    }
+
+    void NextBytes(void* buf, size_t len) {
+        if (index == SIZE) {
+            Generate();
+            index = 0;
+        }
+        if (auto left = (SIZE - index) * 4; left >= len) {
+            memcpy(buf, &MT_TEMPERED[index], len);
+            index += len / 4 + (len % 4 ? 1 : 0);
+        } else {
+            memcpy(buf, &MT_TEMPERED[index], left);
+            index = SIZE;
+            NextBytes((char*)buf + left, len - left);
+        }
+    }
+
+    std::string NextWord(size_t siz = 0, std::string_view chars = "abcdefghijklmnopqrstuvwxyz"sv) {
+        assert(chars.size() < 256);
+        if (!siz) {
+            siz = Next(2, 10);
+        }
+        std::string s;
+        s.resize(siz);
+        NextBytes(s.data(), siz);
+        for (auto& c : s) {
+            c = chars[c % chars.size()];
+        }
+        return s;
+    }
+
+    template<typename V = int32_t, class = std::enable_if_t<std::is_arithmetic_v<V>>>
+    V Next() {
+        if constexpr (std::is_same_v<bool, std::decay_t<V>>) {
+            return Get() >= std::numeric_limits<uint32_t>::max() / 2;
+        } else if constexpr (std::is_integral_v<V>) {
+            std::make_unsigned_t<V> v;
+            if constexpr (sizeof(V) <= 4) {
+                v = (V)Get();
+            } else {
+                v = (V)(Get() | ((uint64_t)Get() << 32));
+            }
+            if constexpr (std::is_signed_v<V>) {
+                return (V)(v & std::numeric_limits<V>::max());
+            } else return (V)v;
+        } else if constexpr (std::is_floating_point_v<V>) {
+            if constexpr (sizeof(V) == 4) {
+                return (float)(double(Get()) / 0xFFFFFFFFu);
+            } else if constexpr (sizeof(V) == 8) {
+                constexpr auto max53 = (1ull << 53) - 1;
+                auto v = ((uint64_t)Get() << 32) | Get();
+                return double(v & max53) / max53;
+            }
+        }
+        assert(false);
+    }
+
+    template<typename V>
+    V Next(V const& from, V const& to) {
+        if (from == to) return from;
+        assert(from < to);
+        if constexpr (std::is_floating_point_v<V>) {
+            return from + Next<V>() * (to - from);
+        } else {
+            return from + Next<V>() % (to - from + 1);
+        }
+    }
+
+    template<typename V>
+    V Next2(V from, V to) {
+        if (from == to) return from;
+        if (to < from) {
+            std::swap(from, to);
+        }
+        if constexpr (std::is_floating_point_v<V>) {
+            return from + Next<V>() * (to - from);
+        } else {
+            return from + Next<V>() % (to - from + 1);
+        }
+    }
+
+    template<typename V>
+    V Next(V const& to) {
+        return Next((V)0, to);
+    }
+
+    template<typename V>
+    V Next(std::pair<V, V> const& fromTo) {
+        return Next(fromTo.first, fromTo.second);
+    }
+};
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
+struct CurvePoint {
+    XY pos{};
+    float tension{ 0.2f };
+    int32_t numSegments{ 100 };
+
+    inline CurvePoint operator+(CurvePoint const& v) const {
+        return { pos + v.pos, tension, numSegments };
+    }
+
+    inline CurvePoint operator-(CurvePoint const& v) const {
+        return { pos - v.pos, tension, numSegments };
+    }
+
+    inline CurvePoint operator*(float const& v) const {
+        return { pos * v, tension, numSegments };
+    }
+};
+
+struct CurvePoints {
+    std::string name;
+    bool isLoop{};
+    std::vector<CurvePoint> points;
+};
+
+struct CurvesPointsCollection {
+    std::vector<CurvePoints> data;
+};
+
+struct MovePathPoint {
+    XY pos{}, inc{};
+    float radians{}, distance{};
+
+    inline MovePathPoint& operator=(CurvePoint const& v) {
+        pos = v.pos;
+        return *this;
+    }
+};
+
+struct MovePath {
+    std::vector<MovePathPoint> points;
+    float totalDistance{};
+    bool loop{};
+
+    void Clear() {
+        points.clear();
+        totalDistance = {};
+        loop = {};
+    }
+
+    void Fill(XY const* ps, size_t len, bool loop) {
+        assert(len > 1);
+        totalDistance = {};
+        this->loop = loop;
+        if (ps) {
+            points.resize(len);
+            for (size_t i = 0; i < len; i++) {
+                points[i].pos = ps[i];
+            }
+        } else {
+            assert(len <= points.size());
+        }
+        for (size_t i = 0; i < len - 1; i++) {
+            FillFields(points[i], points[i + 1]);
+            totalDistance += points[i].distance;
+        }
+        if (loop) {
+            FillFields(points[len - 1], points[0]);
+            totalDistance += points[len - 1].distance;
+        } else {
+            points[len - 1].distance = {};
+            points[len - 1].inc = {};
+            points[len - 1].radians = points[len - 2].radians;
+        }
+    }
+
+    void Fill(bool loop) {
+        Fill(nullptr, points.size(), loop);
+    }
+
+    void FillFields(MovePathPoint& p1, MovePathPoint& p2) {
+        auto v = p2.pos - p1.pos;
+        p1.radians = std::atan2(v.y, v.x);
+        p1.inc = { std::cos(p1.radians), std::sin(p1.radians) };
+        p1.distance = std::sqrt(v.x * v.x + v.y * v.y);
+    }
+
+    // pathway curve ( p p p ... )  to 2 control points bezier( p c c p c c p ... )
+    template<typename List1, typename List2>
+    inline void CurveToBezier(List1& bs, List2 const& cs) {
+        auto n = cs.size();
+        auto len = n * 3 - 2;
+        bs.resize(len);
+
+        bs[0] = cs[0];
+        bs[1] = (cs[1] - cs[0]) * cs[0].tension + cs[0];
+
+        for (size_t i = 0; i < n - 2; i++) {
+            auto diff = (cs[i + 2] - cs[i]) * cs[i].tension;
+            bs[3 * i + 2] = cs[i + 1] - diff;
+            bs[3 * i + 3] = cs[i + 1];
+            bs[3 * i + 4] = cs[i + 1] + diff;
+        }
+        bs[len - 2] = (cs[n - 2] - cs[n - 1]) * cs[n - 2].tension + cs[n - 1];
+        bs[len - 1] = cs[n - 1];
+    }
+
+    // 2 control points bezier( p c c p c c p ... ) to split points
+    template<typename List1, typename List2>
+    inline void BezierToPoints(List1& ps, List2 const& bs) {
+        auto len = (bs.size() - 1) / 3;
+        size_t totalSegments = 0;
+        for (size_t j = 0; j < len; ++j) {
+            totalSegments += bs[j * 3].numSegments;
+        }
+        ps.resize(totalSegments);
+        totalSegments = 0;
+        for (size_t j = 0; j < len; ++j) {
+            auto idx = j * 3;
+            auto numSegments = bs[idx].numSegments;
+            auto step = 1.0f / numSegments;
+            for (int i = 0; i < numSegments; ++i) {
+                auto t = step * i;
+                auto t1 = 1 - t;
+                ps[totalSegments + i] = bs[idx] * t1 * t1 * t1
+                    + bs[idx + 1] * 3 * t * t1 * t1
+                    + bs[idx + 2] * 3 * t * t * (1 - t)
+                    + bs[idx + 3] * t * t * t;
+            }
+            totalSegments += numSegments;
+        }
+    }
+
+    void FillCurve(bool loop, std::vector<CurvePoint> const& ps) {
+        auto len = ps.size();
+        assert(len >= 2);
+
+        // 2 point: line
+        if (len == 2) {
+            points.emplace_back(MovePathPoint{ ps[0].pos });
+            points.emplace_back(MovePathPoint{ ps[1].pos });
+        }
+        // curve
+        else {
+            std::vector<CurvePoint> cs;
+
+            // curve to 2 control points curve
+            if (loop) {
+                std::vector<CurvePoint> bs;
+                bs.reserve(len + 6);
+                // insert addons
+                bs.push_back(ps[len - 3]);
+                bs.push_back(ps[len - 2]);
+                bs.push_back(ps[len - 1]);
+                bs.insert(bs.end(), ps.begin(), ps.end());
+                bs.push_back(ps[0]);
+                bs.push_back(ps[1]);
+                bs.push_back(ps[2]);
+                CurveToBezier(cs, bs);
+                // remove addons
+                cs.resize(cs.size() - 6);
+                cs.erase(cs.begin(), cs.begin() + 9);
+            } else {
+                CurveToBezier(cs, ps);
+            }
+
+            // 2 control points curve to split points
+            BezierToPoints(points, cs);
+
+            if (!loop) {
+                auto& last = ps.back();
+                auto& point = points.emplace_back();
+                point.pos = last.pos;
+            }
+        }
+        // fill inc, radians, distance
+        Fill(loop);
+    }
+};
+
+struct MovePathSteper {
+    xx::Shared<MovePath> mp;
+    size_t cursor{};	// mp[ index ]
+    float cursorDistance{};	// forward
+
+    void Init(xx::Shared<MovePath> mp) {
+        this->mp = std::move(mp);
+        cursor = {};
+        cursorDistance = {};
+    }
+
+    struct MoveResult {
+        XY pos{};
+        float radians{}, movedDistance{};
+        bool terminated;
+    };
+
+    MoveResult MoveToBegin() {
+        assert(mp);
+        assert(mp->points.size());
+        cursor = {};
+        cursorDistance = {};
+        auto& p = mp->points.front();
+        return { .pos = p.pos, .radians = p.radians, .movedDistance = {}, .terminated = false };
+    }
+
+    MoveResult MoveForward(float const& stepDistance) {
+        assert(mp);
+        assert(mp->points.size());
+        auto& ps = mp->points;
+        auto siz = ps.size();
+        auto loop = mp->loop;
+        auto d = stepDistance;
+    LabLoop:
+        auto& p = ps[cursor];
+        auto left = p.distance - cursorDistance;
+        if (d > left) {
+            d -= left;
+            cursorDistance = 0.f;
+            ++cursor;
+            if (cursor == siz) {
+                if (loop) {
+                    cursor = 0;
+                } else {
+                    cursor = siz - 1;
+                    return { .pos = p.pos, .radians = p.radians, .movedDistance = stepDistance - d, .terminated = true };
+                }
+            }
+            goto LabLoop;
+        } else {
+            cursorDistance += d;
+        }
+        return { .pos = p.pos + (p.inc * cursorDistance), .radians = p.radians, .movedDistance = stepDistance, .terminated = !mp->loop && cursor == siz - 1 };
+    }
+};
+
+struct MovePathCachePoint {
+    XY pos{};
+    float radians{};
+};
+
+struct MovePathCache {
+    std::vector<MovePathCachePoint> points;
+    bool loop{};
+    float stepDistance{};
+
+    void Init(MovePath const& mp, float const& stepDistance = 1.f) {
+        assert(stepDistance > 0);
+        assert(mp.totalDistance > stepDistance);
+        this->stepDistance = stepDistance;
+        this->loop = mp.loop;
+        auto td = mp.totalDistance + stepDistance;
+        points.clear();
+        points.reserve(std::ceil(mp.totalDistance / stepDistance));
+
+        MovePathSteper mpr;
+        mpr.mp.pointer = (MovePath*)&mp;	// tmp fill fake ptr instead Init(std::move(mp));
+        auto mr = mpr.MoveToBegin();
+        points.push_back({ mr.pos, mr.radians });
+        for (float d = stepDistance; d < td; d += stepDistance) {
+            mr = mpr.MoveForward(stepDistance);
+            points.push_back({ mr.pos, mr.radians });
+        }
+        mpr.mp.pointer = {};	// clear fake ptr
+    }
+
+    MovePathCachePoint* Move(float const& totalDistance) {
+        int i = totalDistance / stepDistance;
+        if (loop) {
+            return &points[i % points.size()];
+        } else {
+            return i < points.size() ? &points[i] : nullptr;
+        }
+    }
+};
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
 struct FpsViewer {
     double fpsTimePool{}, counter{}, fps{};
 
@@ -1331,6 +1774,7 @@ template <typename T> concept Has_OnMouseOut = requires(T t) { { t.OnMouseOut(st
 template<typename Derived>
 struct Engine : EngineBase {
     xx::Tasks tasks;
+    Rnd rnd;
 
     Engine() {
         if constexpr (Has_OnMouseDown<Derived>) {
@@ -1431,7 +1875,7 @@ int main() {
     }
 
     // task utils
-    xx::Task<> Sleep(double secs) {
+    xx::Task<> AsyncSleep(double secs) {
         auto e = nowSecs + secs;
         do {
             co_yield 0;
