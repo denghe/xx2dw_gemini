@@ -12,6 +12,14 @@ EM_BOOL GameLooper::OnMouseMove(EmscriptenMouseEvent const& e) {
     mousePos = { (float)e.targetX - w / 2, h - (float)e.targetY - h / 2 };
     return EM_TRUE;
 }
+EM_BOOL GameLooper::OnMouseDown(EmscriptenMouseEvent const& e) {
+	mouseBtnStates[e.button] = true;
+    return EM_TRUE;
+}
+EM_BOOL GameLooper::OnMouseUp(EmscriptenMouseEvent const& e) {
+	mouseBtnStates[e.button] = false;
+    return EM_TRUE;
+}
 
 void GameLooper::Init() {
     w = gDesign.width * gDisplayScale;
@@ -223,10 +231,12 @@ void Plane::Init(int planeIndex_) {
 	frameIndex = frameIndexMid;
 	godMode = true;
 	visible = 0;
+	pos.x = g9Pos.x1 - diameter;	// hide only
 
 	// bombs init
 	for (size_t i = 0; i < 3; i++) {
 		auto&& b = bombs.Emplace();
+		b.pos.x = g9Pos.x1 - diameter;	// hide only
 		b.type = BombTypes::Trident;
 	}
 
@@ -276,6 +286,8 @@ xx::Task<> Plane::SyncBombPos() {
 			if (Bomb::minSpeedPow2 > dd) {
 				pos = tarPos;
 			} else {
+				// todo: limit max speed?
+
 				pos += d.As<float>() / (i ? (moving ? Bomb::movingFollowSteps : Bomb::stopFollowSteps) : Bomb::firstFollowSteps);
 			}
 			tarPos = { pos.x, pos.y - (moving ? 0 : Bomb::diameter) };
@@ -341,20 +353,19 @@ xx::Task<> Plane::Update() {
 		// bak for change frame display
 		auto oldPos = pos;
 
-		// todo
-		//// fire
-		//if (gLooper.Pressed(xx::Mbtns::Left) && gLooper.nowSecs >= bulletNextFireTime) {
-		//	bulletNextFireTime = gLooper.nowSecs + PlaneBullet::fireCD;			// apply cd effect
+		// auto fire
+		if (gLooper.nowSecs >= bulletNextFireTime) {
+			bulletNextFireTime = gLooper.nowSecs + PlaneBullet::fireCD;			// apply cd effect
 
-		//	bullets.Emplace(XY{ pos.x, pos.y + PlaneBullet::fireYOffset });
-		//}
+			bullets.Emplace(XY{ pos.x, pos.y + PlaneBullet::fireYOffset });
+		}
 
-		//// use bomb
-		//if (gLooper.Pressed(xx::Mbtns::Right) && gLooper.nowSecs >= bulletNextFireTime) {
-		//	bombNextUseTime = gLooper.nowSecs + PlaneBullet::fireCD;				// apply cd effect
+		// use bomb
+		if (gLooper.mouseBtnStates[0] && gLooper.nowSecs >= bulletNextFireTime) {
+			bombNextUseTime = gLooper.nowSecs + PlaneBullet::fireCD;				// apply cd effect
 
-		//	// todo: switch( first bomb type ) ....
-		//}
+			// todo: switch( first bomb type ) ....
+		}
 
 		// move by mouse ois
 		auto mp = gMousePos * g1_DisplayScale;
@@ -532,6 +543,7 @@ void MonsterStrawberry::Draw(Quad& texBrush) {
 void MonsterDragonfly::Init() {
 	Add(MainLogic());
 	frameIndex = gRnd.Next((float)frameIndexMin, frameIndexMax + 0.999f);
+	pos.y = g9Pos.y8 + diameter;	// hide only for first frame
 }
 
 xx::Task<> MonsterDragonfly::MainLogic() {
@@ -676,7 +688,7 @@ xx::Task<> MonsterClip::MainLogic() {
 LabVerticalMove:
 	float delay = aimDelaySeconds;
 	do {
-		delay -= gFds;
+		delay -= gFrameDelay;
 		co_yield 0;
 	} while (delay >= 0);
 

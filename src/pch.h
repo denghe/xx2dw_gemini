@@ -1777,6 +1777,8 @@ struct Engine : EngineBase {
     Rnd rnd;
 
     Engine() {
+        // EM_BOOL OnMouseXXXXXXXXXXX(EmscriptenMouseEvent const& e) { return EM_TRUE; } 
+
         if constexpr (Has_OnMouseDown<Derived>) {
             emscripten_set_mousedown_callback("canvas", this, true, [](int, const EmscriptenMouseEvent* e, void* ud)->EM_BOOL {
                 return ((Derived*)ud)->OnMouseDown(*e);

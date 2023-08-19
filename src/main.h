@@ -18,7 +18,10 @@ struct GameLooper : Engine<GameLooper> {
     CharTexCache ctc;
     FpsViewer fv;
     XY mousePos;
+	std::array<bool, 16> mouseBtnStates{};
     EM_BOOL OnMouseMove(EmscriptenMouseEvent const& e);
+    EM_BOOL OnMouseDown(EmscriptenMouseEvent const& e);
+    EM_BOOL OnMouseUp(EmscriptenMouseEvent const& e);
 	void Init();
 	void Update();
 	xx::Task<> MainTask();
@@ -66,24 +69,22 @@ struct GameLooper : Engine<GameLooper> {
 };
 extern GameLooper gLooper;
 
-inline XY& gMousePos = gLooper.mousePos;
-inline Rnd& gRnd = gLooper.rnd;
-
-// global configs
-constexpr float gFps = 120.f;// 60.f;
-constexpr double gFds = 1. / gFps;
-constexpr float gSpeedScale = 60.f / gFps;
-
-// window size = design size * display scale
-constexpr float gDisplayScale = 4.f;
-constexpr float g1_DisplayScale = 1.f / gDisplayScale;
-
 struct gDesign_ {
+	static constexpr float fps = 60;
 	static constexpr float width = 224;
 	static constexpr float height = 256;
 	static constexpr float width_2 = width / 2;
 	static constexpr float height_2 = height / 2;
 } constexpr gDesign;
+
+// for easy use
+inline XY& gMousePos = gLooper.mousePos;
+inline Rnd& gRnd = gLooper.rnd;
+constexpr float gFps = EngineBase::fps;
+constexpr double gFrameDelay = EngineBase::frameDelay;
+constexpr float gSpeedScale = gDesign.fps / gFps;
+constexpr float gDisplayScale = 4.f;		// window size = design size * display scale
+constexpr float g1_DisplayScale = 1.f / gDisplayScale;		// for / -> *
 
 /*
 	screen design anchor point
@@ -164,7 +165,7 @@ struct PlaneBullet {
 struct Plane : PosFrameIndexTasks {
 	static constexpr float height = 25.f;
 	static constexpr float height_2 = height / 2;
-	static constexpr float radius = 9.f;
+	static constexpr float radius = 9.f, diameter = radius * 2;
 	static constexpr float bornXs[2] = { g9Pos.x7 + 80 , g9Pos.x1 + 128 };
 	static constexpr float bornYFrom = g9Pos.y2 - height_2;	// out of the screen
 	static constexpr float bornYTo = g9Pos.y7 - 220;
