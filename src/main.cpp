@@ -2,6 +2,7 @@
 #include "main.h"
 
 int main() {
+	printf("main()\n");
     emscripten_request_animation_frame_loop([](double ms, void*)->EM_BOOL {
         return gLooper.JsLoopCallback(ms);
         }, nullptr);
@@ -80,8 +81,8 @@ xx::Task<> GameLooper::MainTask() {
     ctc.Init();
 
 	// preload texs
-    auto tp = co_await AsyncLoadTexturePackerFromUrl("res/gemini.plist");
-    xx_assert(tp);
+    auto tp = co_await AsyncLoadTexturePackerFromUrl("res/gemini.blist");
+	xx_assert(tp);
 
 	tp->GetToByPrefix(frames_plane_blue, "plane_blue");
 	tp->GetToByPrefix(frames_plane_red, "plane_red");
