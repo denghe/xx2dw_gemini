@@ -21,7 +21,7 @@ xx::Task<> GameLooper::MainTask() {
     ctc24.Init();
     tb.Init();
 
-    constexpr int maxCount = 400000, amount = 1000;
+    constexpr int maxCount = 1'000'000, amount = 5'000;
     int count = 0;
     bunnies.reserve(maxCount);
 
@@ -47,7 +47,7 @@ xx::Task<> GameLooper::MainTask() {
             frames.push_back(tb.Add(t));
         });
     }
-    while (frames.size() < 12) co_yield 0;
+    while (frames.size() < urls.size()) co_yield 0; // wait all png download
 
     ready = true;
     auto bounds = xx::Make<Bounds>(Bounds{ -w/2, w/2, -h/2, h/2 });
