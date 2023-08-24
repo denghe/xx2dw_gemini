@@ -1753,7 +1753,7 @@ int main() {
         co_return xx::Shared<GLTexture>{};
     }
 
-    template<bool showLog = false, int timeoutSeconds = 10>
+    template<int timeoutSeconds = 10>
     xx::Task<xx::Shared<xx::Data>> AsyncDownloadFromUrl(char const* url) {
         emscripten_fetch_attr_t attr;
         emscripten_fetch_attr_init(&attr);
