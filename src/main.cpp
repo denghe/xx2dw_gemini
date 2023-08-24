@@ -78,7 +78,8 @@ XY const* GameLooper::GetPlanePos() {
 }
 
 xx::Task<> GameLooper::MainTask() {
-    ctc.Init();
+    ctc24.Init();
+    ctc72.Init();
 
 	// preload texs
     auto tp = co_await AsyncLoadTexturePackerFromUrl("res/gemini.blist");
@@ -104,23 +105,23 @@ xx::Task<> GameLooper::MainTask() {
 	{
 		MovePath mp;
 		CurvePoints cps;
-		cps.points.emplace_back().pos = { g9Pos.x7 + 150, g9Pos.y7 + MonsterDragonfly::diameter };
-		cps.points.emplace_back().pos = { g9Pos.x7 + 190, g9Pos.y7 - 10 };
-		cps.points.emplace_back().pos = { g9Pos.x7 + 30, g9Pos.y7 - 100 };
-		cps.points.emplace_back().pos = { g9Pos.x7 + 190, g9Pos.y7 - 170 };
-		cps.points.emplace_back().pos = { g9Pos.x7 + 30, g9Pos.y7 - 250 };
-		cps.points.emplace_back().pos = { g9Pos.x7 + 60, g9Pos.y3 - MonsterDragonfly::diameter };
+		cps.points.emplace_back().pos = { gDesign.x7 + 150, gDesign.y7 + MonsterDragonfly::diameter };
+		cps.points.emplace_back().pos = { gDesign.x7 + 190, gDesign.y7 - 10 };
+		cps.points.emplace_back().pos = { gDesign.x7 + 30, gDesign.y7 - 100 };
+		cps.points.emplace_back().pos = { gDesign.x7 + 190, gDesign.y7 - 170 };
+		cps.points.emplace_back().pos = { gDesign.x7 + 30, gDesign.y7 - 250 };
+		cps.points.emplace_back().pos = { gDesign.x7 + 60, gDesign.y3 - MonsterDragonfly::diameter };
 		mp.Clear();
 		mp.FillCurve(cps.isLoop, cps.points);
 		MonsterDragonfly::paths[0].Init(mp, 1);
 
 		cps.points.clear();
-		cps.points.emplace_back().pos = { g9Pos.x9 - 150, g9Pos.y9 + MonsterDragonfly::diameter };
-		cps.points.emplace_back().pos = { g9Pos.x9 - 190, g9Pos.y9 - 10 };
-		cps.points.emplace_back().pos = { g9Pos.x9 - 30, g9Pos.y9 - 100 };
-		cps.points.emplace_back().pos = { g9Pos.x9 - 190, g9Pos.y9 - 170 };
-		cps.points.emplace_back().pos = { g9Pos.x9 - 30, g9Pos.y9 - 250 };
-		cps.points.emplace_back().pos = { g9Pos.x9 - 60, g9Pos.y3 - MonsterDragonfly::diameter };
+		cps.points.emplace_back().pos = { gDesign.x9 - 150, gDesign.y9 + MonsterDragonfly::diameter };
+		cps.points.emplace_back().pos = { gDesign.x9 - 190, gDesign.y9 - 10 };
+		cps.points.emplace_back().pos = { gDesign.x9 - 30, gDesign.y9 - 100 };
+		cps.points.emplace_back().pos = { gDesign.x9 - 190, gDesign.y9 - 170 };
+		cps.points.emplace_back().pos = { gDesign.x9 - 30, gDesign.y9 - 250 };
+		cps.points.emplace_back().pos = { gDesign.x9 - 60, gDesign.y3 - MonsterDragonfly::diameter };
 		mp.Clear();
 		mp.FillCurve(cps.isLoop, cps.points);
 		MonsterDragonfly::paths[1].Init(mp, 1);
@@ -220,10 +221,13 @@ void GameLooper::Draw() {
 
 	// todo: more Draw
 
-	fv.Draw(ctc);       // draw fps at corner
+	ctc72.Draw({ gDesign.x7 * gDisplayScale, gDesign.y7 * gDisplayScale - 36 }, "asdfqwer");
+
+	fv.Draw(ctc24);       // draw fps at corner
 }
 
-
+/*****************************************************************************************************/
+/*****************************************************************************************************/
 
 void Plane::Init(int planeIndex_) {
 	// data init
@@ -232,12 +236,12 @@ void Plane::Init(int planeIndex_) {
 	frameIndex = frameIndexMid;
 	godMode = true;
 	visible = 0;
-	pos.x = g9Pos.x1 - diameter;	// hide only
+	pos.x = gDesign.x1 - diameter;	// hide only
 
 	// bombs init
 	for (size_t i = 0; i < 3; i++) {
 		auto&& b = bombs.Emplace();
-		b.pos.x = g9Pos.x1 - diameter;	// hide only
+		b.pos.x = gDesign.x1 - diameter;	// hide only
 		b.type = BombTypes::Trident;
 	}
 
@@ -450,7 +454,7 @@ xx::Task<> Bomb::MainLogic() {
 	do {
 		pos.y -= minSpeed;
 		co_yield 0;
-	} while (pos.y > g9Pos.y1 - diameter);
+	} while (pos.y > gDesign.y1 - diameter);
 }
 
 void Bomb::Draw(Quad& texBrush) {
@@ -518,7 +522,7 @@ xx::Task<> MonsterStrawberry::MainLogic() {
 	// vertical move begin
 	inc = { 0, -verticalMoveSpeed };
 	frameIndex = verticalFrameIndexMin;
-	while (pos.y > g9Pos.y1 - diameter) {
+	while (pos.y > gDesign.y1 - diameter) {
 		co_yield 0;
 		pos += inc;
 		frameIndex += verticalMoveFrameSwitchDelay;
@@ -527,7 +531,7 @@ xx::Task<> MonsterStrawberry::MainLogic() {
 
 	// vertical move repeat
 	frameIndex = verticalRepeatFrameIndexMin + (frameIndex - verticalFrameIndexMax - 1);
-	while (pos.y > g9Pos.y1 - diameter) {
+	while (pos.y > gDesign.y1 - diameter) {
 		co_yield 0;
 		pos += inc;
 		StepFrameIndex<verticalRepeatFrameIndexMin, verticalRepeatFrameIndexMax>(frameIndex, frameSwitchDelay);
@@ -544,7 +548,7 @@ void MonsterStrawberry::Draw(Quad& texBrush) {
 void MonsterDragonfly::Init() {
 	Add(MainLogic());
 	frameIndex = gRnd.Next((float)frameIndexMin, frameIndexMax + 0.999f);
-	pos.y = g9Pos.y8 + diameter;	// hide only for first frame
+	pos.y = gDesign.y8 + diameter;	// hide only for first frame
 }
 
 xx::Task<> MonsterDragonfly::MainLogic() {
@@ -562,7 +566,7 @@ xx::Task<> MonsterDragonfly::MainLogic() {
 		pos = o->pos;
 		StepFrameIndex<frameIndexMin, frameIndexMax>(frameIndex, frameSwitchDelay);
 		co_yield 0;
-	} while (pos.y > g9Pos.y1 - diameter);
+	} while (pos.y > gDesign.y1 - diameter);
 };
 
 void MonsterDragonfly::Draw(Quad& texBrush) {
@@ -584,7 +588,7 @@ xx::Task<> MonsterHermitCrab::MainLogic() {
 		pos.y -= speed;
 		StepFrameIndex<frameIndexMin, frameIndexMax>(frameIndex, frameSwitchDelay);
 		co_yield 0;
-	} while (pos.y > g9Pos.y1 - diameter);
+	} while (pos.y > gDesign.y1 - diameter);
 };
 
 void MonsterHermitCrab::Draw(Quad& texBrush) {
@@ -597,11 +601,11 @@ void MonsterHermitCrab::Draw(Quad& texBrush) {
 void MonsterFly::Init() {
 	Add(MainLogic());
 	frameIndex = gRnd.Next((float)frameIndexMin, frameIndexMax + 0.999f);
-	pos = { g9Pos.x7 + gRnd.Next<float>(gDesign.width - diameter), g9Pos.y7 + diameter };
+	pos = { gDesign.x7 + gRnd.Next<float>(gDesign.width - diameter), gDesign.y7 + diameter };
 }
 
 xx::Task<> MonsterFly::MainLogic() {
-	XY tar{ g9Pos.x1 + gRnd.Next<float>(gDesign.width - diameter), g9Pos.y1 - diameter };
+	XY tar{ gDesign.x1 + gRnd.Next<float>(gDesign.width - diameter), gDesign.y1 - diameter };
 	auto d = tar - pos;
 	auto dist = std::sqrt(d.x * d.x + d.y * d.y);
 	auto speed = gRnd.Next(speedMin, speedMax);
@@ -625,7 +629,7 @@ void MonsterBigFly::Init() {
 	Add(MainLogic());
 	frameIndex = gRnd.Next((float)frameIndexMin, frameIndexMax + 0.999f);
 	pos.x = gRnd.Next<bool>() ? x1 : x2;
-	pos.y = g9Pos.y7 + diameter;
+	pos.y = gDesign.y7 + diameter;
 }
 
 xx::Task<> MonsterBigFly::MainLogic() {
@@ -641,7 +645,7 @@ xx::Task<> MonsterBigFly::MainLogic() {
 		pos.y -= speed;
 		StepFrameIndex<frameIndexMin, frameIndexMax>(frameIndex, frameSwitchDelay2);
 		co_yield 0;
-	} while (pos.y > g9Pos.y1 - diameter);
+	} while (pos.y > gDesign.y1 - diameter);
 };
 
 void MonsterBigFly::Draw(Quad& texBrush) {
@@ -661,7 +665,7 @@ xx::Task<> MonsterButterfly::MainLogic() {
 	do {
 		StepFrameIndex<frameIndexMin, frameIndexMax>(frameIndex, frameSwitchDelay);
 		co_yield 0;
-	} while (pos.y > g9Pos.y1 - diameter);
+	} while (pos.y > gDesign.y1 - diameter);
 };
 
 void MonsterButterfly::Draw(Quad& texBrush) {
@@ -674,7 +678,7 @@ void MonsterButterfly::Draw(Quad& texBrush) {
 void MonsterClip::Init() {
 	Add(MainLogic());
 	frameIndex = gRnd.Next((float)frameIndexMin, frameIndexMax + 0.999f);
-	pos = { gRnd.Next<float>(xFrom, xTo), g9Pos.y7 + diameter };
+	pos = { gRnd.Next<float>(xFrom, xTo), gDesign.y7 + diameter };
 }
 
 xx::Task<> MonsterClip::MainLogic() {
@@ -683,7 +687,7 @@ xx::Task<> MonsterClip::MainLogic() {
 		StepFrameIndex<frameIndexMin, frameIndexMax>(frameIndex, frameSwitchDelay);
 		if (auto pp = gLooper.GetPlanePos(); pp && pos.y + aimPosYOffset <= pp->y) goto LabVerticalMove;
 		co_yield 0;
-	} while (pos.y > g9Pos.y1 - diameter);
+	} while (pos.y > gDesign.y1 - diameter);
 	co_return;
 
 LabVerticalMove:
@@ -699,14 +703,14 @@ LabVerticalMove:
 			pos.x -= speed;
 			StepFrameIndex<verticalFrameIndexMin, verticalFrameIndexMax>(frameIndex, frameSwitchDelay);
 			co_yield 0;
-		} while (pos.x > g9Pos.x1 - diameter);
+		} while (pos.x > gDesign.x1 - diameter);
 	} else {
 		frameIndex = verticalFrameIndexMin2;
 		do {
 			pos.x += speed;
 			StepFrameIndex<verticalFrameIndexMin2, verticalFrameIndexMax2>(frameIndex, frameSwitchDelay);
 			co_yield 0;
-		} while (pos.x < g9Pos.x3 + diameter);
+		} while (pos.x < gDesign.x3 + diameter);
 	}
 };
 

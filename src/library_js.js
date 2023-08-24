@@ -1,24 +1,24 @@
 mergeInto(LibraryManager.library, {
 
-  init_gCanvas: function(width, height) {
+  init_gCanvas: function(charSize, canvasWidth, canvasHeight) {
     if (window['gCanvas'] === undefined) {
       var canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
       var ctx = canvas.getContext('2d');
+      ctx.font = charSize + 'px monospace';
+      ctx.textBaseline = "middle";
       ctx.globalAlpha = 1;
       ctx.fillStyle = 'white';
-      ctx.textBaseline = "middle";
-      window['gCanvas'] = canvas;
-      window['gCanvasCtx'] = ctx;
+      window['gCanvas' + charSize] = canvas;
+      window['gCanvasCtx' + charSize] = ctx;
     }
   },
 
   upload_unicode_char_to_texture: function(charSize, utf8Char) {
-    var canvas = window['gCanvas'];
-    var ctx = window['gCanvasCtx'];
+    var canvas = window['gCanvas' + charSize];
+    var ctx = window['gCanvasCtx' + charSize];
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = charSize + 'px monospace';
     var str = UTF8ToString(utf8Char);
     var strPixelWidth = ctx.measureText(str).width;
     ctx.fillText(str, 0, canvas.height / 2);

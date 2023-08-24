@@ -15,7 +15,7 @@
 
 // code at library_js.js
 extern "C" {
-void init_gCanvas(int width, int height);
+void init_gCanvas(int charSize, int width, int height);
 double upload_unicode_char_to_texture(int charSize, const char *unicodeChar);
 void load_texture_from_url(GLuint texture, const char *url, int *outWidth, int *outHeight);
 }
@@ -898,20 +898,20 @@ struct CharInfo {
     uint16_t texRectX{}, texRectY{}, texRectW{}, texRectH{};
 };
 
+template<int charSize_ = 24, int canvasWidth_ = 32, int canvasHeight_ = 32, int texWidth_ = 2048, int texHeight_ = 2048>
 struct CharTexCache {
-    constexpr static float texWidth = 2048, texHeight = 2048;
+    static constexpr int charSize = charSize_, canvasWidth = canvasWidth_, canvasHeight = canvasHeight_, texWidth = texWidth_, texHeight = texHeight_;
     std::vector<xx::Shared<GLTexture>> texs;
     xx::Shared<GLTexture> ct;
     float cw{};
     XY p{ 0, texHeight - 1 };
 
-    static constexpr int charSize = 24, canvasWidth = 32, canvasHeight = 32;
     std::array<CharInfo, 256> bases;
     std::unordered_map<char32_t, CharInfo> extras;
 
     // need ogl frame env
     void Init() {
-        init_gCanvas(canvasWidth, canvasHeight);
+        init_gCanvas(charSize, canvasWidth, canvasHeight);
 
         texs.emplace_back(FrameBuffer::MakeTexture({ (uint32_t)texWidth, (uint32_t)texHeight }));
         ct = xx::Make<GLTexture>(GLGenTextures<true>(), canvasWidth, canvasHeight, "");
@@ -1574,7 +1574,9 @@ struct MovePathCache {
 struct FpsViewer {
     double fpsTimePool{}, counter{}, fps{};
 
-    void Draw(CharTexCache& cp) {
+    // CTC: char texture cache
+    template<typename CTC>
+    void Draw(CTC& cp) {
         ++counter;
         fpsTimePool += gEngine->delta;
         if (fpsTimePool >= 1) {

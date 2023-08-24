@@ -15,7 +15,8 @@ struct MonsterButterfly;
 struct MonsterClip;
 
 struct GameLooper : Engine<GameLooper> {
-    CharTexCache ctc;
+    CharTexCache<24,32,32,2048,2048> ctc24;
+    CharTexCache<72,96,96,2048,2048> ctc72;
     FpsViewer fv;
     XY mousePos;
 	std::array<bool, 16> mouseBtnStates{};
@@ -75,6 +76,36 @@ struct gDesign_ {
 	static constexpr float height = 256;
 	static constexpr float width_2 = width / 2;
 	static constexpr float height_2 = height / 2;
+	/*
+		screen design anchor point
+	   ┌───────────────────────────────┐
+	   │ 7             8             9 │
+	   │                               │
+	   │                               │
+	   │ 4             5             6 │
+	   │                               │
+	   │                               │
+	   │ 1             2             3 │
+	   └───────────────────────────────┘
+	*/
+	static constexpr float x1 = -width_2;
+	static constexpr float y1 = -height_2;
+	static constexpr float x2 = 0.f;
+	static constexpr float y2 = -height_2;
+	static constexpr float x3 = width_2;
+	static constexpr float y3 = -height_2;
+	static constexpr float x4 = -width_2;
+	static constexpr float y4 = 0.f;
+	static constexpr float x5 = 0.f;
+	static constexpr float y5 = 0.f;
+	static constexpr float x6 = width_2;
+	static constexpr float y6 = 0.f;
+	static constexpr float x7 = -width_2;
+	static constexpr float y7 = height_2;
+	static constexpr float x8 = 0.f;
+	static constexpr float y8 = height_2;
+	static constexpr float x9 = width_2;
+	static constexpr float y9 = height_2;
 } constexpr gDesign;
 
 // for easy use
@@ -85,39 +116,6 @@ constexpr double gFrameDelay = EngineBase::frameDelay;
 constexpr float gSpeedScale = gDesign.fps / gFps;
 constexpr float gDisplayScale = 4.f;		// window size = design size * display scale
 constexpr float g1_DisplayScale = 1.f / gDisplayScale;		// for / -> *
-
-/*
-	screen design anchor point
-   ┌───────────────────────────────┐
-   │ 7             8             9 │
-   │                               │
-   │                               │
-   │ 4             5             6 │
-   │                               │
-   │                               │
-   │ 1             2             3 │
-   └───────────────────────────────┘
-*/
-struct g9Pos_ {
-	static constexpr float x1 = -gDesign.width_2;
-	static constexpr float y1 = -gDesign.height_2;
-	static constexpr float x2 = 0.f;
-	static constexpr float y2 = -gDesign.height_2;
-	static constexpr float x3 = gDesign.width_2;
-	static constexpr float y3 = -gDesign.height_2;
-	static constexpr float x4 = -gDesign.width_2;
-	static constexpr float y4 = 0.f;
-	static constexpr float x5 = 0.f;
-	static constexpr float y5 = 0.f;
-	static constexpr float x6 = gDesign.width_2;
-	static constexpr float y6 = 0.f;
-	static constexpr float x7 = -gDesign.width_2;
-	static constexpr float y7 = gDesign.height_2;
-	static constexpr float x8 = 0.f;
-	static constexpr float y8 = gDesign.height_2;
-	static constexpr float x9 = gDesign.width_2;
-	static constexpr float y9 = gDesign.height_2;
-} constexpr g9Pos;
 
 /*****************************************************************************************************/
 /*****************************************************************************************************/
@@ -166,9 +164,9 @@ struct Plane : PosFrameIndexTasks {
 	static constexpr float height = 25.f;
 	static constexpr float height_2 = height / 2;
 	static constexpr float radius = 9.f, diameter = radius * 2;
-	static constexpr float bornXs[2] = { g9Pos.x7 + 80 , g9Pos.x1 + 128 };
-	static constexpr float bornYFrom = g9Pos.y2 - height_2;	// out of the screen
-	static constexpr float bornYTo = g9Pos.y7 - 220;
+	static constexpr float bornXs[2] = { gDesign.x7 + 80 , gDesign.x1 + 128 };
+	static constexpr float bornYFrom = gDesign.y2 - height_2;	// out of the screen
+	static constexpr float bornYTo = gDesign.y7 - 220;
 	static constexpr float bornSpeed = 1.f * gSpeedScale;
 	static constexpr float normalSpeed = 1.5f * gSpeedScale;
 	static constexpr float maxSpeed = 4.f * gSpeedScale;
@@ -248,8 +246,8 @@ struct ExplosionBigMonster : PosFrameIndexTasks {
 struct MonsterStrawberry : PosFrameIndexTasks {
 	static constexpr float radius = 6.f;
 	static constexpr float diameter = radius * 2;
-	static constexpr float bornYFrom = g9Pos.y7 - 96;
-	static constexpr float bornYTo = g9Pos.y7 - 40;
+	static constexpr float bornYFrom = gDesign.y7 - 96;
+	static constexpr float bornYTo = gDesign.y7 - 40;
 	static constexpr float frameSwitchDelay = 1.f / 6 * gSpeedScale;
 	static constexpr float horizontalMoveSpeed = 1.5f * gSpeedScale;
 	static constexpr int horizontalFrameIndexMin = 0;
@@ -287,9 +285,9 @@ struct MonsterHermitCrab : PosFrameIndexTasks {
 	static constexpr float radius = 6.f;
 	static constexpr float diameter = radius * 2;
 	static constexpr float speed = 1.f * gSpeedScale;
-	static constexpr float bornPosY = g9Pos.y7 + diameter;
-	static constexpr float bornPosXFrom = g9Pos.x7 + 20;
-	static constexpr float bornPosXTo = g9Pos.x9 - 20;
+	static constexpr float bornPosY = gDesign.y7 + diameter;
+	static constexpr float bornPosXFrom = gDesign.x7 + 20;
+	static constexpr float bornPosXTo = gDesign.x9 - 20;
 	static constexpr int frameIndexMin = 0;
 	static constexpr int frameIndexMax = 7;
 	static constexpr float frameSwitchDelay = 1.f / 4 * gSpeedScale;
@@ -317,9 +315,9 @@ struct MonsterBigFly : PosFrameIndexTasks {
 	static constexpr float radius = 8.f;
 	static constexpr float diameter = radius * 2;
 	static constexpr float speed = 1.f * gSpeedScale;
-	static constexpr float x1 = g9Pos.x7 + 33;
-	static constexpr float x2 = g9Pos.x9 - 33;
-	static constexpr float horizontalMoveToY = g9Pos.y7 - 146;
+	static constexpr float x1 = gDesign.x7 + 33;
+	static constexpr float x2 = gDesign.x9 - 33;
+	static constexpr float horizontalMoveToY = gDesign.y7 - 146;
 	static constexpr int frameIndexMin = 0;
 	static constexpr int frameIndexMax = 5;
 	static constexpr float frameSwitchDelay1 = 1.f / 8 * gSpeedScale;	// horizontal move
@@ -347,8 +345,8 @@ struct MonsterClip : PosFrameIndexTasks {
 	static constexpr float radius = 4.f;
 	static constexpr float diameter = radius * 2;
 	static constexpr float speed = 1.f * gSpeedScale;
-	static constexpr float xFrom = g9Pos.x7 + diameter * 2;
-	static constexpr float xTo = g9Pos.x9 - diameter * 2;
+	static constexpr float xFrom = gDesign.x7 + diameter * 2;
+	static constexpr float xTo = gDesign.x9 - diameter * 2;
 	static constexpr float frameSwitchDelay = 1.f / 4 * gSpeedScale;
 	static constexpr int frameIndexMin = 0;
 	static constexpr int frameIndexMax = 3;
