@@ -85,8 +85,10 @@ if (EMSCRIPTEN)
  	# Reduce code size: We do not need native POSIX filesystem emulation support (Emscripten FS/MEMFS)
  	append_linker_flags("-sFILESYSTEM=0")
 
-	# fetch support
+	#####################################################
 	append_linker_flags("-sFETCH")
+	append_linker_flags("-sALLOW_MEMORY_GROWTH=1")
+	
 
 	if (${CMAKE_BUILD_TYPE} MATCHES "Rel*")
  		# Optimization flag to optimize aggressively for size. (other options -Os, -O3, -O2, -O1, -O0)

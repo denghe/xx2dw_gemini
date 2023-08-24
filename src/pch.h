@@ -217,8 +217,8 @@ inline GLProgram LinkGLProgram(GLuint const& vs, GLuint const& fs) {
 inline GLFrameBuffer MakeGLFrameBuffer() {
     GLuint f{};
     glGenFramebuffers(1, &f);
-    glBindFramebuffer(GL_FRAMEBUFFER, f);
-    return GLFrameBuffer(f);    // not complete
+    //glBindFramebuffer(GL_FRAMEBUFFER, f);
+    return GLFrameBuffer(f);
 }
 
 inline void BindGLFrameBufferTexture(GLuint const& f, GLuint const& t) {
@@ -724,7 +724,8 @@ struct FrameBuffer {
         return *this;
     }
 
-    inline static xx::Shared<GLTexture> MakeTexture(Vec2<uint32_t> const& wh, bool const& hasAlpha = true) {
+    template<typename WH>
+    inline static xx::Shared<GLTexture> MakeTexture(WH const& wh, bool const& hasAlpha = true) {
         return xx::Make<GLTexture>(GLTexture::Create(wh.x, wh.y, hasAlpha));
     }
 
@@ -798,9 +799,9 @@ struct Frame {
     }
 };
 
-/**********************************************************************************************************************************/
-/**********************************************************************************************************************************/
 
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
 
 // sprite
 struct Quad : QuadInstanceData {
@@ -893,6 +894,63 @@ struct Quad : QuadInstanceData {
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
+template<int texWidth_ = 2048, int texHeight_ = 2048>
+struct TexBatcher {
+    static constexpr int texWidth = texWidth_, texHeight = texHeight_;
+    std::vector<xx::Shared<GLTexture>> texs;
+    Quad quad;
+    FrameBuffer fb;
+    float cw{};
+    XY p{ 0, texHeight - 1 };
+
+    // need ogl frame env
+    void Init() {
+        fb.Init();
+        quad.SetAnchor({ 0, 1 });
+        texs.emplace_back(FrameBuffer::MakeTexture(Vec2{ texWidth, texHeight }));
+    }
+
+    xx::Shared<Frame> Add(xx::Shared<GLTexture> tex) {
+        xx_assert(tex->Width() < texWidth && tex->Height() < texHeight);
+        auto cw = (float)tex->Width();
+        auto ch = (float)tex->Height();
+
+        // todo: handle dynamic line height
+        auto cp = p;
+        if (p.x + cw > texWidth) {                  // line wrap
+            cp.x = 0;
+            p.x = cw;
+            if (p.y - ch < 0) {                     // new page
+                texs.emplace_back(FrameBuffer::MakeTexture(Vec2{ texWidth, texHeight }));
+                p.y = cp.y = texHeight - 1;
+            } else {                                // new line
+                p.y -= ch;
+                cp.y = p.y;
+            }
+        } else {                                    // current line
+            p.x += cw;
+        }
+
+        auto& t = texs.back();
+        fb.DrawTo(t, {}, [&]() {
+            auto pp = cp + XY{ -texWidth / 2, -texHeight / 2 };
+            quad.SetPosition(pp).SetTexture(tex).Draw();
+            });
+
+        auto f = xx::Make<Frame>();
+        f->anchor = { 0.5, 0.5 };
+        f->textureRotated = false;
+        f->spriteSize = f->spriteSourceSize = { cw, ch };
+        f->spriteOffset = {};
+        f->textureRect = { cp.x, texHeight - 1 - cp.y, cw, ch };
+        f->tex = t;
+        return f;
+    }
+};
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
 struct CharInfo {
     xx::Shared<GLTexture> tex;
     uint16_t texRectX{}, texRectY{}, texRectW{}, texRectH{};
@@ -903,6 +961,7 @@ struct CharTexCache {
     static constexpr int charSize = charSize_, canvasWidth = canvasWidth_, canvasHeight = canvasHeight_, texWidth = texWidth_, texHeight = texHeight_;
     std::vector<xx::Shared<GLTexture>> texs;
     xx::Shared<GLTexture> ct;
+    FrameBuffer fb;
     float cw{};
     XY p{ 0, texHeight - 1 };
 
@@ -911,9 +970,10 @@ struct CharTexCache {
 
     // need ogl frame env
     void Init() {
+        fb.Init();
         init_gCanvas(charSize, canvasWidth, canvasHeight);
 
-        texs.emplace_back(FrameBuffer::MakeTexture({ (uint32_t)texWidth, (uint32_t)texHeight }));
+        texs.emplace_back(FrameBuffer::MakeTexture(Vec2{ texWidth, texHeight }));
         ct = xx::Make<GLTexture>(GLGenTextures<true>(), canvasWidth, canvasHeight, "");
 
         char buf[16];
@@ -945,7 +1005,7 @@ struct CharTexCache {
             cp.x = 0;
             p.x = cw;
             if (p.y - canvasHeight < 0) {                     // new page
-                texs.emplace_back(FrameBuffer::MakeTexture({ (uint32_t)texWidth, (uint32_t)texHeight }));
+                texs.emplace_back(FrameBuffer::MakeTexture(Vec2{ texWidth, texHeight }));
                 p.y = cp.y = texHeight - 1;
             } else {                                // new line
                 p.y -= canvasHeight;
@@ -956,7 +1016,7 @@ struct CharTexCache {
         }
 
         auto& t = texs.back();
-        FrameBuffer(true).DrawTo(t, {}, [&]() {
+        fb.DrawTo(t, {}, [&]() {
             Quad().SetAnchor({0, 1}).SetPosition(cp + XY{-texWidth / 2, -texHeight / 2}).SetTexture(ct).Draw();
         });
 
@@ -1572,13 +1632,13 @@ struct MovePathCache {
 /**********************************************************************************************************************************/
 
 struct FpsViewer {
-    double fpsTimePool{}, counter{}, fps{};
+    double fpsTimePool{}, lastSecs{ xx::NowSteadyEpochSeconds() }, counter{}, fps{};
 
     // CTC: char texture cache
     template<typename CTC>
     void Draw(CTC& cp) {
         ++counter;
-        fpsTimePool += gEngine->delta;
+        fpsTimePool += xx::NowSteadyEpochSeconds(lastSecs);
         if (fpsTimePool >= 1) {
             fpsTimePool -= 1;
             fps = counter;
