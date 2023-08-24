@@ -2,5 +2,5 @@ build
 .idea
 cmake-build-*
 .vs
-/web
+web
 pch.*.TMP
