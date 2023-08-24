@@ -21,7 +21,7 @@ xx::Task<> GameLooper::MainTask() {
     ctc24.Init();
     tb.Init();
 
-    constexpr int maxCount = 100000, amount = 100;
+    constexpr int maxCount = 400000, amount = 1000;
     int count = 0;
     bunnies.reserve(maxCount);
 
