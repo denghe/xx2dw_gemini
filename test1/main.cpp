@@ -25,7 +25,7 @@ xx::Task<> GameLooper::MainTask() {
     int count = 0;
     bunnies.reserve(maxCount);
 
-    std::array<char const*, 12> urls = {
+    auto frames = co_await AsyncLoadBatchFramesFromUrls(tb, {
         "res/rabbitv3.png"
         , "res/rabbitv3_ash.png"
         , "res/rabbitv3_batman.png"
@@ -38,22 +38,13 @@ xx::Task<> GameLooper::MainTask() {
         , "res/rabbitv3_superman.png"
         , "res/rabbitv3_tron.png"
         , "res/rabbitv3_wolverine.png"
-    };
-    
-    std::vector<xx::Shared<Frame>> frames;
-    for (auto& url : urls) {
-        tasks.Add([&, url = url]()->xx::Task<> {
-            auto t = co_await AsyncLoadTextureFromUrl(url);
-            frames.push_back(tb.Add(t));
-        });
-    }
-    while (frames.size() < urls.size()) co_yield 0; // wait all png download
-
+    });
     ready = true;
+    
     auto bounds = xx::Make<Bounds>(Bounds{ -w/2, w/2, -h/2, h/2 });
     while (count < maxCount) {
         for (int i = 0; i < amount; i++) {
-            auto&& b = bunnies.emplace_back(frames[count % urls.size()], bounds);
+            auto&& b = bunnies.emplace_back(frames[count % frames.size()], bounds);
             b.pos.x = (count % 2) * w - w / 2;
             ++count;
         }

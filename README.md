@@ -52,6 +52,8 @@ vs22 with llvm installed
 
 use cmake gui fill -T        ClangCL         generate .sln & open
 
+after open .sln,  delete    CMakeCCompilerId.c  &   CMakeCXXCompilerId.cpp   from project
+
 # build & browse
 in vs22, hot key : ctrl + `  open developer powershells:
 mkdir ?????

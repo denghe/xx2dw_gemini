@@ -1813,7 +1813,37 @@ int main() {
         co_return xx::Shared<GLTexture>{};
     }
 
-    template<int timeoutSeconds = 10>
+    template<bool showLog = false, int timeoutSeconds = 10>
+    xx::Task<std::vector<xx::Shared<GLTexture>>> AsyncLoadTexturesFromUrls(std::initializer_list<char const*> urls) {
+        std::vector<xx::Shared<GLTexture>> rtv;
+        rtv.resize(urls.size());
+        size_t counter = 0;
+        for (size_t i = 0; i < urls.size(); ++i) {
+            tasks.Add([this, &counter, tar = &rtv[i], url = *(urls.begin() + i)]()->xx::Task<> {
+                *tar = co_await AsyncLoadTextureFromUrl<showLog, timeoutSeconds>(url);
+                ++counter;
+            });
+        }
+        while (counter < urls.size()) co_yield 0; // wait all
+        co_return rtv;
+    }
+
+    template<bool showLog = false, int timeoutSeconds = 10, typename TB>
+    xx::Task<std::vector<xx::Shared<Frame>>> AsyncLoadBatchFramesFromUrls(TB& tb, std::initializer_list<char const*> urls) {
+        std::vector<xx::Shared<Frame>> rtv;
+        rtv.resize(urls.size());
+        size_t counter = 0;
+        for (size_t i = 0; i < urls.size(); ++i) {
+            tasks.Add([this, &tb, &counter, tar = &rtv[i], url = *(urls.begin() + i)]()->xx::Task<> {
+                *tar = tb.Add(co_await AsyncLoadTextureFromUrl<showLog, timeoutSeconds>(url));
+                ++counter;
+            });
+        }
+        while (counter < urls.size()) co_yield 0; // wait all
+        co_return rtv;
+    }
+
+    // todo: timeout support
     xx::Task<xx::Shared<xx::Data>> AsyncDownloadFromUrl(char const* url) {
         emscripten_fetch_attr_t attr;
         emscripten_fetch_attr_init(&attr);
