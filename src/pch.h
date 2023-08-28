@@ -6,12 +6,182 @@
 #include <xx_queue.h>
 #include <xx_string.h>
 #include <xx_data.h>
+
+#include <rect_pack_2d.h>
 #include <random>
 
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
 #include <emscripten/fetch.h>
 #include <webgl/webgl2.h>
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
+// reference from https://github.com/cslarsen/mersenne-twister
+// faster than std impl, can store & restore state data directly
+// ser/de data size == 5000 bytes
+struct Rnd {
+
+#pragma region impl
+    inline static const size_t SIZE = 624;
+    inline static const size_t PERIOD = 397;
+    inline static const size_t DIFF = SIZE - PERIOD;
+    inline static const uint32_t MAGIC = 0x9908b0df;
+
+    uint32_t MT[SIZE];
+    uint32_t MT_TEMPERED[SIZE];
+    size_t index = SIZE;
+    uint32_t seed;
+
+#define Random5_M32(x) (0x80000000 & x) // 32nd MSB
+#define Random5_L31(x) (0x7FFFFFFF & x) // 31 LSBs
+#define Random5_UNROLL(expr) \
+  y = Random5_M32(MT[i]) | Random5_L31(MT[i+1]); \
+  MT[i] = MT[expr] ^ (y >> 1) ^ (((int32_t(y) << 31) >> 31) & MAGIC); \
+  ++i;
+    void Generate() {
+        size_t i = 0;
+        uint32_t y;
+        while (i < DIFF) {
+            Random5_UNROLL(i + PERIOD);
+        }
+        while (i < SIZE - 1) {
+            Random5_UNROLL(i - DIFF);
+        }
+        {
+            y = Random5_M32(MT[SIZE - 1]) | Random5_L31(MT[0]);
+            MT[SIZE - 1] = MT[PERIOD - 1] ^ (y >> 1) ^ (((int32_t(y) << 31) >> 31) & MAGIC);
+        }
+        for (size_t i = 0; i < SIZE; ++i) {
+            y = MT[i];
+            y ^= y >> 11;
+            y ^= y << 7 & 0x9d2c5680;
+            y ^= y << 15 & 0xefc60000;
+            y ^= y >> 18;
+            MT_TEMPERED[i] = y;
+        }
+        index = 0;
+    }
+#undef Random5_UNROLL
+#undef Random5_L31
+#undef Random5_M32
+#pragma endregion
+
+    Rnd() {
+        SetSeed(std::random_device()());
+    }
+
+    void SetSeed(uint32_t const& seed) {
+        this->seed = seed;
+        MT[0] = seed;
+        index = SIZE;
+        for (uint_fast32_t i = 1; i < SIZE; ++i) {
+            MT[i] = 0x6c078965 * (MT[i - 1] ^ MT[i - 1] >> 30) + i;
+        }
+    }
+
+    uint32_t Get() {
+        if (index == SIZE) {
+            Generate();
+            index = 0;
+        }
+        return MT_TEMPERED[index++];
+    }
+
+    void NextBytes(void* buf, size_t len) {
+        if (index == SIZE) {
+            Generate();
+            index = 0;
+        }
+        if (auto left = (SIZE - index) * 4; left >= len) {
+            memcpy(buf, &MT_TEMPERED[index], len);
+            index += len / 4 + (len % 4 ? 1 : 0);
+        } else {
+            memcpy(buf, &MT_TEMPERED[index], left);
+            index = SIZE;
+            NextBytes((char*)buf + left, len - left);
+        }
+    }
+
+    std::string NextWord(size_t siz = 0, std::string_view chars = "abcdefghijklmnopqrstuvwxyz"sv) {
+        assert(chars.size() < 256);
+        if (!siz) {
+            siz = Next(2, 10);
+        }
+        std::string s;
+        s.resize(siz);
+        NextBytes(s.data(), siz);
+        for (auto& c : s) {
+            c = chars[c % chars.size()];
+        }
+        return s;
+    }
+
+    template<typename V = int32_t, class = std::enable_if_t<std::is_arithmetic_v<V>>>
+    V Next() {
+        if constexpr (std::is_same_v<bool, std::decay_t<V>>) {
+            return Get() >= std::numeric_limits<uint32_t>::max() / 2;
+        } else if constexpr (std::is_integral_v<V>) {
+            std::make_unsigned_t<V> v;
+            if constexpr (sizeof(V) <= 4) {
+                v = (V)Get();
+            } else {
+                v = (V)(Get() | ((uint64_t)Get() << 32));
+            }
+            if constexpr (std::is_signed_v<V>) {
+                return (V)(v & std::numeric_limits<V>::max());
+            } else return (V)v;
+        } else if constexpr (std::is_floating_point_v<V>) {
+            if constexpr (sizeof(V) == 4) {
+                return (float)(double(Get()) / 0xFFFFFFFFu);
+            } else if constexpr (sizeof(V) == 8) {
+                constexpr auto max53 = (1ull << 53) - 1;
+                auto v = ((uint64_t)Get() << 32) | Get();
+                return double(v & max53) / max53;
+            }
+        }
+        assert(false);
+    }
+
+    template<typename V>
+    V Next(V const& from, V const& to) {
+        if (from == to) return from;
+        assert(from < to);
+        if constexpr (std::is_floating_point_v<V>) {
+            return from + Next<V>() * (to - from);
+        } else {
+            return from + Next<V>() % (to - from + 1);
+        }
+    }
+
+    template<typename V>
+    V Next2(V from, V to) {
+        if (from == to) return from;
+        if (to < from) {
+            std::swap(from, to);
+        }
+        if constexpr (std::is_floating_point_v<V>) {
+            return from + Next<V>() * (to - from);
+        } else {
+            return from + Next<V>() % (to - from + 1);
+        }
+    }
+
+    template<typename V>
+    V Next(V const& to) {
+        return Next((V)0, to);
+    }
+
+    template<typename V>
+    V Next(std::pair<V, V> const& fromTo) {
+        return Next(fromTo.first, fromTo.second);
+    }
+};
+
+/**********************************************************************************************************************************/
+/**********************************************************************************************************************************/
+
 
 // code at library_js.js
 extern "C" {
@@ -635,6 +805,7 @@ struct EngineBase {
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE glContext;
     float flipY{ 1 };   // -1: flip  for ogl frame buffer
     Shader_QuadInstance shader;
+    Rnd rnd;
 
     static constexpr float fps = 60, frameDelay = 1.f / fps, maxFrameDelay = frameDelay * 3;
     double nowSecs{}, delta{};
@@ -789,6 +960,7 @@ struct Frame {
     // single texture -> frame
     inline xx::Shared<Frame> static Create(xx::Shared<GLTexture> t) {
         auto f = xx::Make<Frame>();
+        f->key = t->FileName();
         f->anchor = { 0.5, 0.5 };
         f->textureRotated = false;
         f->spriteSize = f->spriteSourceSize = { (float)t->Width(), (float)t->Height() };
@@ -888,63 +1060,6 @@ struct Quad : QuadInstanceData {
     Quad& Draw() {
         gEngine->shader.Draw(*tex, *this);
         return *this;
-    }
-};
-
-/**********************************************************************************************************************************/
-/**********************************************************************************************************************************/
-
-template<int texWidth_ = 2048, int texHeight_ = 2048>
-struct TexBatcher {
-    static constexpr int texWidth = texWidth_, texHeight = texHeight_;
-    std::vector<xx::Shared<GLTexture>> texs;
-    Quad quad;
-    FrameBuffer fb;
-    float cw{};
-    XY p{ 0, texHeight - 1 };
-
-    // need ogl frame env
-    void Init() {
-        fb.Init();
-        quad.SetAnchor({ 0, 1 });
-        texs.emplace_back(FrameBuffer::MakeTexture(Vec2{ texWidth, texHeight }));
-    }
-
-    xx::Shared<Frame> Add(xx::Shared<GLTexture> tex) {
-        xx_assert(tex->Width() < texWidth && tex->Height() < texHeight);
-        auto cw = (float)tex->Width();
-        auto ch = (float)tex->Height();
-
-        // todo: handle dynamic line height
-        auto cp = p;
-        if (p.x + cw > texWidth) {                  // line wrap
-            cp.x = 0;
-            p.x = cw;
-            if (p.y - ch < 0) {                     // new page
-                texs.emplace_back(FrameBuffer::MakeTexture(Vec2{ texWidth, texHeight }));
-                p.y = cp.y = texHeight - 1;
-            } else {                                // new line
-                p.y -= ch;
-                cp.y = p.y;
-            }
-        } else {                                    // current line
-            p.x += cw;
-        }
-
-        auto& t = texs.back();
-        fb.DrawTo(t, {}, [&]() {
-            auto pp = cp + XY{ -texWidth / 2, -texHeight / 2 };
-            quad.SetPosition(pp).SetTexture(tex).Draw();
-            });
-
-        auto f = xx::Make<Frame>();
-        f->anchor = { 0.5, 0.5 };
-        f->textureRotated = false;
-        f->spriteSize = f->spriteSourceSize = { cw, ch };
-        f->spriteOffset = {};
-        f->textureRect = { cp.x, texHeight - 1 - cp.y, cw, ch };
-        f->tex = t;
-        return f;
     }
 };
 
@@ -1085,51 +1200,17 @@ struct CharTexCache {
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
-struct TexturePacker {
-    xx::Shared<GLTexture> tex;
+struct Frames {
     std::vector<xx::Shared<Frame>> frames;
-    bool premultiplyAlpha;
-    std::string realTextureFileName;
-    std::string plistUrl;
-
-    // fill by plist file's binary content ( .blist ). success return 0
-    int Load(xx::Data_r dr, std::string_view const& plistUrl_) {
-        tex.Reset();
-        frames.clear();
-        premultiplyAlpha = {};
-        realTextureFileName.clear();
-        plistUrl = plistUrl_;
-
-        auto tp = xx::Make<TexturePacker>();
-        std::string rootPath;
-        if (auto&& i = plistUrl.find_last_of("/"); i != plistUrl.npos) {
-            rootPath = plistUrl.substr(0, i + 1);
-        }
-
-        size_t numFrames{};
-        if (int r = dr.Read(premultiplyAlpha, realTextureFileName, numFrames)) return r;
-        for (size_t i = 0; i < numFrames; ++i) {
-            auto f = xx::Make<Frame>();
-            if (int r = dr.Read(f->key, f->anchor)) return r;
-            if (int r = dr.Read((xx::RWFloatUInt16&)f->spriteOffset.x, (xx::RWFloatUInt16&)f->spriteOffset.y)) return r;
-            if (int r = dr.Read((xx::RWFloatUInt16&)f->spriteSize.x, (xx::RWFloatUInt16&)f->spriteSize.y)) return r;
-            if (int r = dr.Read((xx::RWFloatUInt16&)f->spriteSourceSize.x, (xx::RWFloatUInt16&)f->spriteSourceSize.y)) return r;
-            if (int r = dr.Read((xx::RWFloatUInt16&)f->textureRect.x, (xx::RWFloatUInt16&)f->textureRect.y)) return r;
-            if (int r = dr.Read((xx::RWFloatUInt16&)f->textureRect.wh.x, (xx::RWFloatUInt16&)f->textureRect.wh.y)) return r;
-            frames.emplace_back(std::move(f));
-        }
-        realTextureFileName = rootPath + realTextureFileName;
-
-        return 0;
-    }
 
     // get frame by key
     xx::Shared<Frame> const& Get(std::string_view const& key) const {
         for (auto& f : frames) {
             if (f->key == key) return f;
         }
-        throw std::logic_error(xx::ToString(key, " is not found in tp: ", plistUrl));
+        throw std::logic_error(xx::ToString(key, " is not found"));
     }
+
     xx::Shared<Frame> const& Get(char const* const& buf, size_t const& len) const {
         return Get(std::string_view(buf, len));
     }
@@ -1186,167 +1267,102 @@ struct TexturePacker {
     }
 };
 
+struct TexturePacker : Frames {
+    bool premultiplyAlpha;
+    std::string realTextureFileName;
+    std::string plistUrl;
+
+    // fill by plist file's binary content ( .blist ). success return 0
+    int Load(xx::Data_r dr, std::string_view const& plistUrl_) {
+        frames.clear();
+        premultiplyAlpha = {};
+        realTextureFileName.clear();
+        plistUrl = plistUrl_;
+
+        auto tp = xx::Make<TexturePacker>();
+        std::string rootPath;
+        if (auto&& i = plistUrl.find_last_of("/"); i != plistUrl.npos) {
+            rootPath = plistUrl.substr(0, i + 1);
+        }
+
+        size_t numFrames{};
+        if (int r = dr.Read(premultiplyAlpha, realTextureFileName, numFrames)) return r;
+        for (size_t i = 0; i < numFrames; ++i) {
+            auto f = xx::Make<Frame>();
+            if (int r = dr.Read(f->key, f->anchor)) return r;
+            if (int r = dr.Read((xx::RWFloatUInt16&)f->spriteOffset.x, (xx::RWFloatUInt16&)f->spriteOffset.y)) return r;
+            if (int r = dr.Read((xx::RWFloatUInt16&)f->spriteSize.x, (xx::RWFloatUInt16&)f->spriteSize.y)) return r;
+            if (int r = dr.Read((xx::RWFloatUInt16&)f->spriteSourceSize.x, (xx::RWFloatUInt16&)f->spriteSourceSize.y)) return r;
+            if (int r = dr.Read((xx::RWFloatUInt16&)f->textureRect.x, (xx::RWFloatUInt16&)f->textureRect.y)) return r;
+            if (int r = dr.Read((xx::RWFloatUInt16&)f->textureRect.wh.x, (xx::RWFloatUInt16&)f->textureRect.wh.y)) return r;
+            frames.emplace_back(std::move(f));
+        }
+        realTextureFileName = rootPath + realTextureFileName;
+
+        return 0;
+    }
+};
+
 /**********************************************************************************************************************************/
 /**********************************************************************************************************************************/
 
-// reference from https://github.com/cslarsen/mersenne-twister
-// faster than std impl, can store & restore state data directly
-// ser/de data size == 5000 bytes
-struct Rnd {
+template<int texWH_ = 2048>
+struct DynamicTexturePacker : Frames {
+    static constexpr int texWH = texWH_;
 
-#pragma region impl
-    inline static const size_t SIZE = 624;
-    inline static const size_t PERIOD = 397;
-    inline static const size_t DIFF = SIZE - PERIOD;
-    inline static const uint32_t MAGIC = 0x9908b0df;
-
-    uint32_t MT[SIZE];
-    uint32_t MT_TEMPERED[SIZE];
-    size_t index = SIZE;
-    uint32_t seed;
-
-#define Random5_M32(x) (0x80000000 & x) // 32nd MSB
-#define Random5_L31(x) (0x7FFFFFFF & x) // 31 LSBs
-#define Random5_UNROLL(expr) \
-  y = Random5_M32(MT[i]) | Random5_L31(MT[i+1]); \
-  MT[i] = MT[expr] ^ (y >> 1) ^ (((int32_t(y) << 31) >> 31) & MAGIC); \
-  ++i;
-    void Generate() {
-        size_t i = 0;
-        uint32_t y;
-        while (i < DIFF) {
-            Random5_UNROLL(i + PERIOD);
-        }
-        while (i < SIZE - 1) {
-            Random5_UNROLL(i - DIFF);
-        }
-        {
-            y = Random5_M32(MT[SIZE - 1]) | Random5_L31(MT[0]);
-            MT[SIZE - 1] = MT[PERIOD - 1] ^ (y >> 1) ^ (((int32_t(y) << 31) >> 31) & MAGIC);
-        }
-        for (size_t i = 0; i < SIZE; ++i) {
-            y = MT[i];
-            y ^= y >> 11;
-            y ^= y << 7 & 0x9d2c5680;
-            y ^= y << 15 & 0xefc60000;
-            y ^= y >> 18;
-            MT_TEMPERED[i] = y;
-        }
-        index = 0;
-    }
-#undef Random5_UNROLL
-#undef Random5_L31
-#undef Random5_M32
-#pragma endregion
-
-    Rnd() {
-        SetSeed(std::random_device()());
+    void Clear() {
+        frames.clear();
     }
 
-    void SetSeed(uint32_t const& seed) {
-        this->seed = seed;
-        MT[0] = seed;
-        index = SIZE;
-        for (uint_fast32_t i = 1; i < SIZE; ++i) {
-            MT[i] = 0x6c078965 * (MT[i - 1] ^ MT[i - 1] >> 30) + i;
+    // need ogl frame env
+    // return true: success
+    bool Fill(std::vector<xx::Shared<Frame>>& subFrames) {
+        using namespace rect_pack_2d;
+        frames.clear();
+        frames.reserve(subFrames.size());
+        std::vector<rect_xywhf> rects;
+        std::vector<rect_xywhf*> rectptrs;
+        rects.reserve(subFrames.size());
+        rectptrs.reserve(subFrames.size());
+        for (auto& sf : subFrames) {
+            auto& r = rects.emplace_back(0, 0, sf->textureRect.wh.x, sf->textureRect.wh.y);
+            r.ud = &sf;
+            rectptrs.push_back(&r);
         }
+        std::vector<bin> bins;
+        if (!pack(rectptrs.data(), rectptrs.size(), texWH, false, bins)) return false;
+
+        FrameBuffer fb(true);
+        for (auto& bin : bins) {
+            int w = xx::Round2n(bin.size.w);
+            int h = xx::Round2n(bin.size.h);
+            auto t = FrameBuffer::MakeTexture(Vec2{ w, h });
+            XY basePos{ -w / 2, -h / 2 };
+            fb.DrawTo(t, {}, [&]() {
+                Quad q;
+                q.SetAnchor({ 0, 1 });
+                for (auto& r : bin.rects) {
+                    auto& sf = *(xx::Shared<Frame>*)r->ud;
+                    q.SetPosition(basePos + XY{ r->x, r->y }).SetFrame(sf).Draw();
+
+                    auto&& f = frames.emplace_back().Emplace();
+                    *f = *sf;
+                    f->textureRect.x = r->x;
+                    f->textureRect.y = h - 1 - r->y;
+                    f->tex = t;
+                }
+            });
+        }
+        return true;
     }
 
-    uint32_t Get() {
-        if (index == SIZE) {
-            Generate();
-            index = 0;
+    bool Fill(std::vector<xx::Shared<GLTexture>> const& subTexs) {
+        std::vector<xx::Shared<Frame>> fs;
+        fs.reserve(subTexs.size());
+        for (auto& t : subTexs) {
+            fs.emplace_back(Frame::Create(t));
         }
-        return MT_TEMPERED[index++];
-    }
-
-    void NextBytes(void* buf, size_t len) {
-        if (index == SIZE) {
-            Generate();
-            index = 0;
-        }
-        if (auto left = (SIZE - index) * 4; left >= len) {
-            memcpy(buf, &MT_TEMPERED[index], len);
-            index += len / 4 + (len % 4 ? 1 : 0);
-        } else {
-            memcpy(buf, &MT_TEMPERED[index], left);
-            index = SIZE;
-            NextBytes((char*)buf + left, len - left);
-        }
-    }
-
-    std::string NextWord(size_t siz = 0, std::string_view chars = "abcdefghijklmnopqrstuvwxyz"sv) {
-        assert(chars.size() < 256);
-        if (!siz) {
-            siz = Next(2, 10);
-        }
-        std::string s;
-        s.resize(siz);
-        NextBytes(s.data(), siz);
-        for (auto& c : s) {
-            c = chars[c % chars.size()];
-        }
-        return s;
-    }
-
-    template<typename V = int32_t, class = std::enable_if_t<std::is_arithmetic_v<V>>>
-    V Next() {
-        if constexpr (std::is_same_v<bool, std::decay_t<V>>) {
-            return Get() >= std::numeric_limits<uint32_t>::max() / 2;
-        } else if constexpr (std::is_integral_v<V>) {
-            std::make_unsigned_t<V> v;
-            if constexpr (sizeof(V) <= 4) {
-                v = (V)Get();
-            } else {
-                v = (V)(Get() | ((uint64_t)Get() << 32));
-            }
-            if constexpr (std::is_signed_v<V>) {
-                return (V)(v & std::numeric_limits<V>::max());
-            } else return (V)v;
-        } else if constexpr (std::is_floating_point_v<V>) {
-            if constexpr (sizeof(V) == 4) {
-                return (float)(double(Get()) / 0xFFFFFFFFu);
-            } else if constexpr (sizeof(V) == 8) {
-                constexpr auto max53 = (1ull << 53) - 1;
-                auto v = ((uint64_t)Get() << 32) | Get();
-                return double(v & max53) / max53;
-            }
-        }
-        assert(false);
-    }
-
-    template<typename V>
-    V Next(V const& from, V const& to) {
-        if (from == to) return from;
-        assert(from < to);
-        if constexpr (std::is_floating_point_v<V>) {
-            return from + Next<V>() * (to - from);
-        } else {
-            return from + Next<V>() % (to - from + 1);
-        }
-    }
-
-    template<typename V>
-    V Next2(V from, V to) {
-        if (from == to) return from;
-        if (to < from) {
-            std::swap(from, to);
-        }
-        if constexpr (std::is_floating_point_v<V>) {
-            return from + Next<V>() * (to - from);
-        } else {
-            return from + Next<V>() % (to - from + 1);
-        }
-    }
-
-    template<typename V>
-    V Next(V const& to) {
-        return Next((V)0, to);
-    }
-
-    template<typename V>
-    V Next(std::pair<V, V> const& fromTo) {
-        return Next(fromTo.first, fromTo.second);
+        return Fill(fs);
     }
 };
 
@@ -1679,7 +1695,6 @@ template <typename T> concept Has_OnMouseOut = requires(T t) { { t.OnMouseOut(st
 template<typename Derived>
 struct Engine : EngineBase {
     xx::Tasks tasks;
-    Rnd rnd;
 
     Engine() {
         // EM_BOOL OnMouseXXXXXXXXXXX(EmscriptenMouseEvent const& e) { return EM_TRUE; } 
@@ -1828,21 +1843,6 @@ int main() {
         co_return rtv;
     }
 
-    template<bool showLog = false, int timeoutSeconds = 10, typename TB>
-    xx::Task<std::vector<xx::Shared<Frame>>> AsyncLoadBatchFramesFromUrls(TB& tb, std::initializer_list<char const*> urls) {
-        std::vector<xx::Shared<Frame>> rtv;
-        rtv.resize(urls.size());
-        size_t counter = 0;
-        for (size_t i = 0; i < urls.size(); ++i) {
-            tasks.Add([this, &tb, &counter, tar = &rtv[i], url = *(urls.begin() + i)]()->xx::Task<> {
-                *tar = tb.Add(co_await AsyncLoadTextureFromUrl<showLog, timeoutSeconds>(url));
-                ++counter;
-            });
-        }
-        while (counter < urls.size()) co_yield 0; // wait all
-        co_return rtv;
-    }
-
     // todo: timeout support
     xx::Task<xx::Shared<xx::Data>> AsyncDownloadFromUrl(char const* url) {
         emscripten_fetch_attr_t attr;
@@ -1887,12 +1887,12 @@ int main() {
             throw std::logic_error(xx::ToString("parse plist file content error: r = ", r, ", url = ", plistUrl));
         }
 
-        tp->tex = co_await AsyncLoadTextureFromUrl(tp->realTextureFileName.c_str());
-        if (!tp->tex) {
+        auto tex = co_await AsyncLoadTextureFromUrl(tp->realTextureFileName.c_str());
+        if (!tex) {
             throw std::logic_error(xx::ToString("async load texturepacker's texture timeout. url = ", tp->realTextureFileName));
         }
         for (auto& f : tp->frames) {
-            f->tex = tp->tex;
+            f->tex = tex;
         }
 
         co_return tp;

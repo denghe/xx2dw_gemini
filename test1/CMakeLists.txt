@@ -103,7 +103,16 @@ endif()
 file(GLOB_RECURSE sources
 	*.cpp
 	*.c
+	*.hpp
 	*.h
+	../xxlib/*.cpp
+	../xxlib/*.c
+	../xxlib/*.hpp
+	../xxlib/*.h
+	../3rd/*.cpp
+	../3rd/*.c
+	../3rd/*.hpp
+	../3rd/*.h
 	../src/pch.cpp
 	../src/pch.h
 )
@@ -119,6 +128,7 @@ if(MSVC)
 endif()
 
 include_directories(
+	../3rd
 	../xxlib
 	../src
 )
